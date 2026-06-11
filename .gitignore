@@ -1,0 +1,29 @@
+# External / reference material
+sdav-ieee1722-smartdada-adapter/
+artigos/
+
+# Original project archive
+tcc.tar.gz
+*:Zone.Identifier
+
+# Local tool settings
+.claude/
+
+# ROS 2 / CMake build outputs
+build/
+install/
+log/
+
+# LaTeX build artifacts
+*.aux
+*.bbl
+*.blg
+*.brf
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.toc
+*.lof
+*.lot
+*.synctex.gz

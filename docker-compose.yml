@@ -1,0 +1,36 @@
+services:
+  ros:
+    build:
+      context: ./docker
+      args:
+        USER_UID: "1000"
+        USER_GID: "1000"
+    image: tcc-semantic-gateway:humble
+    container_name: tcc-ros
+    network_mode: host
+    ipc: host
+    environment:
+      - DISPLAY=${DISPLAY:-:0}
+      - WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-}
+      - XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/tmp}
+      - PULSE_SERVER=${PULSE_SERVER:-}
+      - QT_X11_NO_MITSHM=1
+      - LIBGL_ALWAYS_SOFTWARE=1
+      - TURTLEBOT3_MODEL=burger
+      - ROS_DOMAIN_ID=42
+    volumes:
+      # Mount the project root as the ROS package (package name is set in package.xml)
+      - .:/ros2_ws/src/semantic_gateway:rw
+      - ros2_build:/ros2_ws/build
+      - ros2_install:/ros2_ws/install
+      - ros2_log:/ros2_ws/log
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - /mnt/wslg:/mnt/wslg:rw
+    working_dir: /ros2_ws
+    stdin_open: true
+    tty: true
+
+volumes:
+  ros2_build:
+  ros2_install:
+  ros2_log:
