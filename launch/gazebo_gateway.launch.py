@@ -4,9 +4,14 @@ gazebo_gateway.launch.py — Semantic Gateway with TurtleBot3 + Gazebo Classic
 Moving-robot scenario for the proposta §3.3 ("robô em movimento"):
 
   1. Gazebo (gzserver, optionally gzclient) + world + spawn TurtleBot3 burger
-  2. gateway_node      — generic ROS → SmartData, driven by Gazebo YAML config
-  3. validator_node    — fidelity & integrity report
+  2. gateway_node      — ROS → SmartData, codegen-driven (config/sensors.yaml
+                         baked at build time, covers /imu and /imu/data)
+  3. sd_to_ros_node    — listens to the UDP multicast bus, republishes ROS
+                         messages on <topic>_recovered (proposta §3.3 validador
+                         externo conectado apenas ao barramento DDS/IP)
   4. cmd_vel publisher — drives the robot in a slow circle so TF is dynamic
+
+Fidelity is also pinned by the test suite (`test_validator`, `test_bus_roundtrip`).
 
 Usage:
   export TURTLEBOT3_MODEL=burger
@@ -30,8 +35,6 @@ from launch_ros.actions import Node
 def generate_launch_description():
     tb3_gazebo_share = get_package_share_directory("turtlebot3_gazebo")
     gazebo_ros_share = get_package_share_directory("gazebo_ros")
-    pkg_share        = get_package_share_directory("semantic_gateway")
-    default_config   = os.path.join(pkg_share, "config", "gazebo_sensors.yaml")
 
     return LaunchDescription([
         DeclareLaunchArgument(
@@ -47,9 +50,6 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "drive",        default_value="true",
             description="Publish a constant cmd_vel so the robot moves"),
-        DeclareLaunchArgument(
-            "config_path",  default_value=default_config,
-            description="Path to sensors YAML config"),
         DeclareLaunchArgument(
             "target_frame", default_value="odom",
             description="Frame in which the gateway expresses sensor origins"),
@@ -84,7 +84,7 @@ def generate_launch_description():
             launch_arguments={"use_sim_time": "true"}.items(),
         ),
 
-        # spawn TurtleBot3 
+        # spawn TurtleBot3
         Node(
             package="gazebo_ros",
             executable="spawn_entity.py",
@@ -108,26 +108,21 @@ def generate_launch_description():
             name="semantic_gateway",
             output="screen",
             parameters=[{
-                "use_sim_time":     True,
-                "config_path":      LaunchConfiguration("config_path"),
-                "target_frame":     LaunchConfiguration("target_frame"),
-                "stats_interval_s": 5,
+                "use_sim_time":      True,
+                "target_frame":      LaunchConfiguration("target_frame"),
+                "stats_interval_s":  5,
+                "enable_ros_mirror": True,
             }],
             arguments=["--ros-args", "--log-level", LaunchConfiguration("log_level")],
         ),
 
-        # validator
+        # external SmartData consumer — reconstructs ROS messages from the bus
         Node(
             package="semantic_gateway",
-            executable="validator_node",
-            name="smartdata_validator",
+            executable="sd_to_ros_node",
+            name="sd_to_ros",
             output="screen",
-            parameters=[{
-                "use_sim_time":      True,
-                "config_path":       LaunchConfiguration("config_path"),
-                "target_frame":      LaunchConfiguration("target_frame"),
-                "report_interval_s": 5,
-            }],
+            parameters=[{"use_sim_time": True}],
             arguments=["--ros-args", "--log-level", LaunchConfiguration("log_level")],
         ),
 
@@ -145,6 +140,7 @@ def generate_launch_description():
 
         LogInfo(msg=(
             "Generic Semantic Gateway stack launched on Gazebo. "
-            "Inspect /smartdata/* and the validator report."
+            "Inspect /smartdata/* (DDS mirror) or sniff 224.1.1.1:5000 "
+            "(SmartData wire bus). Fidelity check via `colcon test`."
         )),
     ])

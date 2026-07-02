@@ -19,10 +19,8 @@ find_package(tf2_ros            REQUIRED)
 find_package(tf2_geometry_msgs  REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(rosidl_typesupport_cpp REQUIRED)
-find_package(rosidl_typesupport_introspection_cpp REQUIRED)
 find_package(rcpputils REQUIRED)
 find_package(ament_index_cpp REQUIRED)
-find_package(yaml-cpp REQUIRED)
 
 # ── Message generation ────────────────────────────────────────────────────────
 rosidl_generate_interfaces(${PROJECT_NAME}
@@ -30,7 +28,6 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   DEPENDENCIES std_msgs
 )
 
-# Helper to link generated interfaces to a target (ROS 2 Humble+)
 rosidl_get_typesupport_target(cpp_typesupport_target
   ${PROJECT_NAME} "rosidl_typesupport_cpp")
 
@@ -44,40 +41,60 @@ set(NODE_DEPS
   tf2_ros
   tf2_geometry_msgs
   rosidl_typesupport_cpp
-  rosidl_typesupport_introspection_cpp
   rcpputils
   ament_index_cpp
 )
 
-# ── Shared library: gateway core (config loader + field access + decomposer) ──
-add_library(gateway_core SHARED
-  src/config_loader.cpp
-  src/field_access.cpp
+# ── Codegen: sensors.yaml → generated/parsed_{decompose,dispatch,recompose,sd_dispatch}.hpp ──
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+set(GEN_DIR  ${CMAKE_CURRENT_BINARY_DIR}/generated)
+set(GEN_YAML ${CMAKE_CURRENT_SOURCE_DIR}/config/sensors.yaml)
+set(GEN_TOOL ${CMAKE_CURRENT_SOURCE_DIR}/codegen/generate.py)
+
+set(GEN_OUTS
+  ${GEN_DIR}/parsed_decompose.hpp
+  ${GEN_DIR}/parsed_dispatch.hpp
+  ${GEN_DIR}/parsed_recompose.hpp
+  ${GEN_DIR}/parsed_sd_dispatch.hpp
 )
-target_include_directories(gateway_core PUBLIC
+
+add_custom_command(
+  OUTPUT  ${GEN_OUTS}
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${GEN_DIR}
+  COMMAND ${Python3_EXECUTABLE} ${GEN_TOOL}
+          --yaml ${GEN_YAML} --out ${GEN_DIR}
+  DEPENDS ${GEN_YAML} ${GEN_TOOL}
+  COMMENT "Generating per-sensor codegen from ${GEN_YAML}"
+)
+add_custom_target(gateway_codegen DEPENDS ${GEN_OUTS})
+
+# ── sd_bus library: UDP multicast SmartData wire bus ──────────────────────────
+add_library(sd_bus SHARED src/sd_bus.cpp)
+target_include_directories(sd_bus PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 )
-ament_target_dependencies(gateway_core ${NODE_DEPS})
-target_link_libraries(gateway_core
-  "${cpp_typesupport_target}"
-  yaml-cpp
-)
+target_link_libraries(sd_bus "${cpp_typesupport_target}")
 
 # ── gateway_node ──────────────────────────────────────────────────────────────
 add_executable(gateway_node src/gateway_node.cpp)
+add_dependencies(gateway_node gateway_codegen)
 target_include_directories(gateway_node PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<BUILD_INTERFACE:${GEN_DIR}>
 )
 ament_target_dependencies(gateway_node ${NODE_DEPS})
-target_link_libraries(gateway_node "${cpp_typesupport_target}" gateway_core)
+target_link_libraries(gateway_node "${cpp_typesupport_target}" sd_bus)
 
-# ── validator_node ────────────────────────────────────────────────────────────
-add_executable(validator_node src/validator_node.cpp)
-target_include_directories(validator_node PUBLIC
+# ── sd_to_ros_node ────────────────────────────────────────────────────────────
+add_executable(sd_to_ros_node src/sd_to_ros_node.cpp)
+add_dependencies(sd_to_ros_node gateway_codegen)
+target_include_directories(sd_to_ros_node PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<BUILD_INTERFACE:${GEN_DIR}>
 )
-ament_target_dependencies(validator_node ${NODE_DEPS})
-target_link_libraries(validator_node "${cpp_typesupport_target}" gateway_core)
+ament_target_dependencies(sd_to_ros_node ${NODE_DEPS})
+target_link_libraries(sd_to_ros_node "${cpp_typesupport_target}" sd_bus)
 
 # ── demo_publisher_node ───────────────────────────────────────────────────────
 add_executable(demo_publisher_node src/demo_publisher_node.cpp)
@@ -88,10 +105,10 @@ ament_target_dependencies(demo_publisher_node ${NODE_DEPS})
 target_link_libraries(demo_publisher_node "${cpp_typesupport_target}")
 
 # ── Install ───────────────────────────────────────────────────────────────────
-install(TARGETS gateway_node validator_node demo_publisher_node
+install(TARGETS gateway_node sd_to_ros_node demo_publisher_node
   DESTINATION lib/${PROJECT_NAME}
 )
-install(TARGETS gateway_core
+install(TARGETS sd_bus
   EXPORT export_${PROJECT_NAME}
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib
@@ -113,25 +130,61 @@ if(BUILD_TESTING)
   find_package(ament_lint_auto   REQUIRED)
   ament_lint_auto_find_test_dependencies()
 
-  # Unit tests: marshaling/unmarshaling, SI units, latency bounds
-  ament_add_gtest(test_smartdata_marshaling
-    test/test_smartdata_marshaling.cpp
+  # Unit tests: 32-bit dimensional SI unit encoding (Fig. 1 of the paper)
+  ament_add_gtest(test_si_units
+    test/test_si_units.cpp
   )
-  target_include_directories(test_smartdata_marshaling PUBLIC
+  target_include_directories(test_si_units PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   )
-  ament_target_dependencies(test_smartdata_marshaling ${NODE_DEPS})
-  target_link_libraries(test_smartdata_marshaling "${cpp_typesupport_target}" gateway_core yaml-cpp)
 
-  # Integration test: full gateway pipeline with synthetic data
+  # Integration test: full gateway pipeline with synthetic data (codegen path)
   ament_add_gtest(test_gateway_pipeline
     test/test_gateway_pipeline.cpp
   )
+  add_dependencies(test_gateway_pipeline gateway_codegen)
   target_include_directories(test_gateway_pipeline PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${GEN_DIR}>
   )
   ament_target_dependencies(test_gateway_pipeline ${NODE_DEPS})
-  target_link_libraries(test_gateway_pipeline "${cpp_typesupport_target}" gateway_core yaml-cpp)
+  target_link_libraries(test_gateway_pipeline "${cpp_typesupport_target}")
+
+  # Fidelity test: ROS → decompose_<name> → feed_<name> → ROS (codegen pair)
+  ament_add_gtest(test_validator
+    test/test_validator.cpp
+  )
+  add_dependencies(test_validator gateway_codegen)
+  target_include_directories(test_validator PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${GEN_DIR}>
+  )
+  ament_target_dependencies(test_validator ${NODE_DEPS})
+  target_link_libraries(test_validator "${cpp_typesupport_target}")
+
+  # Synthetic recompose: hand-built SmartData → dispatch_sd → reconstructed ROS
+  ament_add_gtest(test_synthetic_recompose
+    test/test_synthetic_recompose.cpp
+  )
+  add_dependencies(test_synthetic_recompose gateway_codegen)
+  target_include_directories(test_synthetic_recompose PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${GEN_DIR}>
+  )
+  ament_target_dependencies(test_synthetic_recompose ${NODE_DEPS})
+  target_link_libraries(test_synthetic_recompose "${cpp_typesupport_target}")
+
+  # End-to-end bus roundtrip: ROS → gateway → UDP multicast → sd_to_ros → ROS
+  ament_add_gtest(test_bus_roundtrip
+    test/test_bus_roundtrip.cpp
+  )
+  add_dependencies(test_bus_roundtrip gateway_codegen)
+  target_include_directories(test_bus_roundtrip PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${GEN_DIR}>
+  )
+  ament_target_dependencies(test_bus_roundtrip ${NODE_DEPS})
+  target_link_libraries(test_bus_roundtrip "${cpp_typesupport_target}" sd_bus)
 endif()
 
 ament_package()

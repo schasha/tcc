@@ -23,9 +23,26 @@ sensors:
       max_field: range_max
     expiry_ms: 100
 
-  # IMU
+  # IMU (synthetic publisher / general ROS)
   # 1 ROS Imu → 6 SmartData (3 m·s⁻² + 3 rad·s⁻¹)
   - topic: /imu/data
+    type: sensor_msgs/msg/Imu
+    decomposition: composite
+    groups:
+      - unit: meter_per_sec_sq
+        fields:
+          - linear_acceleration.x
+          - linear_acceleration.y
+          - linear_acceleration.z
+      - unit: rad_per_sec
+        fields:
+          - angular_velocity.x
+          - angular_velocity.y
+          - angular_velocity.z
+    expiry_ms: 10
+
+  # IMU (TurtleBot3 default topic in the Gazebo scenario)
+  - topic: /imu
     type: sensor_msgs/msg/Imu
     decomposition: composite
     groups:

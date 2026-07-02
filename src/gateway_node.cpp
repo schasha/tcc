@@ -1,17 +1,24 @@
 // gateway_node.cpp — generic semantic gateway: ROS sensor topics → SmartData
 //
-// for each spec in the loaded config the node creates:
-//   * a rclcpp::GenericSubscription on the input ROS topic (bytes in)
-//   * a Publisher<SmartData> on the configured output topic
-//   * a per-spec MessageView that deserializes those bytes via introspection
+// Codegen path (see codegen/generate.py and config/sensors.yaml):
+//   * config/sensors.yaml is the BUILD-time spec; it is no longer parsed at
+//     runtime. CMake re-runs the generator when the YAML changes.
+//   * For each sensor in the YAML the generator emits a typed function
+//     decompose_<topic>(msg, ox, oy, oz, out). The dispatch header wires a
+//     rclcpp::Subscription<T> per sensor calling that function.
 //
-// on each message, the gateway does TF lookup for the spec's sensor frame
-// (read from the message via `frame_field`) and calls decompose(...)
+// Output path:
+//   * Primary: UDP multicast bus (see docs/wire_format.md). Other SmartData
+//     systems (SDAV transducers etc.) consume this directly.
+//   * Optional mirror on ROS topics for debug/observability — controlled by
+//     the `enable_ros_mirror` parameter (default true).
 
 #include <chrono>
+#include <cstdint>
 #include <memory>
-#include <mutex>
 #include <string>
+#include <tuple>
+#include <unordered_map>
 #include <vector>
 
 #include "rclcpp/rclcpp.hpp"
@@ -19,131 +26,74 @@
 #include "tf2_ros/transform_listener.h"
 #include "tf2_ros/buffer_interface.h"
 #include "tf2/exceptions.h"
-#include "ament_index_cpp/get_package_share_directory.hpp"
 
-#include "config_loader.hpp"
-#include "decomposer.hpp"
-#include "field_access.hpp"
 #include "semantic_gateway/msg/smart_data.hpp"
-#include "si_units.hpp"
-#include "spec.hpp"
+
+#include "parsed_dispatch.hpp"
+#include "sd_bus.hpp"
 
 namespace sg = semantic_gateway;
-
-namespace {
-struct Origin3D { double x{0.0}, y{0.0}, z{0.0}; };
-
-// per-sensor runtime state.
-struct SensorPipe {
-    sg::SensorSpec                                                  spec;
-    rclcpp::Publisher<sg::msg::SmartData>::SharedPtr                pub;
-    std::shared_ptr<rclcpp::GenericSubscription>                    sub;
-    std::unique_ptr<sg::MessageView>                                view;
-    std::mutex                                                      view_mtx;
-    std::size_t                                                     msgs{0};
-    std::size_t                                                     sd_count{0};
-};
-}  // namespace
 
 class GatewayNode : public rclcpp::Node
 {
 public:
     GatewayNode() : Node("semantic_gateway")
     {
-        std::string config_path = declare_parameter<std::string>(
-            "config_path",
-            ament_index_cpp::get_package_share_directory("semantic_gateway")
-                + "/config/sensors.yaml");
-        stats_period_s_ = declare_parameter<int>("stats_interval_s", 5);
+        target_frame_   = declare_parameter<std::string>("target_frame", "map");
+        stats_period_s_ = declare_parameter<int>        ("stats_interval_s", 5);
 
-        sg::GatewayConfig cfg = sg::load_config_file(config_path);
-        target_frame_ = declare_parameter<std::string>(
-            "target_frame", cfg.target_frame);
+        enable_ros_mirror_ = declare_parameter<bool>("enable_ros_mirror", true);
+        bus_group_         = declare_parameter<std::string>("bus_group", sg::SDBus::DEFAULT_GROUP);
+        bus_port_          = declare_parameter<int>        ("bus_port",  sg::SDBus::DEFAULT_PORT);
+        bus_ifaddr_        = declare_parameter<std::string>("bus_ifaddr", "");
 
         tf_buffer_   = std::make_shared<tf2_ros::Buffer>(get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
-        for (const auto & spec : cfg.sensors) {
-            auto pipe   = std::make_shared<SensorPipe>();
-            pipe->spec  = spec;
-            pipe->view  = std::make_unique<sg::MessageView>(spec.type);
-            pipe->pub   = create_publisher<sg::msg::SmartData>(
-                spec.output_topic, rclcpp::QoS(200));
-            // capture raw pointer; SensorPipe lifetime is bound to pipes_
-            SensorPipe * p = pipe.get();
-            pipe->sub = create_generic_subscription(
-                spec.topic, spec.type, rclcpp::SensorDataQoS(),
-                [this, p](std::shared_ptr<rclcpp::SerializedMessage> msg) {
-                    handle(*p, *msg);
-                });
-            pipes_.push_back(pipe);
-            RCLCPP_INFO(get_logger(),
-                "registered sensor: topic=%s type=%s decomposition=%s out=%s",
-                spec.topic.c_str(), spec.type.c_str(),
-                spec.decomposition == sg::Decomposition::Scalar    ? "scalar"
-              : spec.decomposition == sg::Decomposition::Array     ? "array"
-                                                                    : "composite",
-                spec.output_topic.c_str());
-        }
+        bus_ = std::make_unique<sg::SDBus>(
+            bus_group_, static_cast<uint16_t>(bus_port_), bus_ifaddr_);
+
+        auto lookup = [this](const std::string & frame,
+                              const builtin_interfaces::msg::Time & stamp)
+            -> std::tuple<double,double,double> {
+            return lookup_origin(frame, stamp);
+        };
+
+        auto on_sd = [this](const std::string & out_topic,
+                             const sg::msg::SmartData & sd) {
+            bus_->broadcast(sd);
+            ++sd_counts_[out_topic];
+
+            if (enable_ros_mirror_) {
+                auto it = pubs_.find(out_topic);
+                if (it == pubs_.end()) {
+                    it = pubs_.emplace(out_topic,
+                        create_publisher<sg::msg::SmartData>(
+                            out_topic, rclcpp::QoS(200))).first;
+                }
+                it->second->publish(sd);
+            }
+        };
+
+        subs_ = sg::gen::register_all(this, lookup, on_sd);
 
         stats_timer_ = create_wall_timer(
             std::chrono::seconds(stats_period_s_),
             [this] { report_stats(); });
 
         RCLCPP_INFO(get_logger(),
-            "gateway up. target_frame=%s, %zu sensors from %s",
-            target_frame_.c_str(), pipes_.size(), config_path.c_str());
+            "gateway up. target_frame=%s, %zu sensors, bus=%s:%d, ros_mirror=%s",
+            target_frame_.c_str(), subs_.handles.size(),
+            bus_group_.c_str(), bus_port_,
+            enable_ros_mirror_ ? "on" : "off");
     }
 
 private:
-    void handle(SensorPipe & pipe, const rclcpp::SerializedMessage & serialized)
+    std::tuple<double,double,double> lookup_origin(
+        const std::string & sensor_frame,
+        const builtin_interfaces::msg::Time & stamp)
     {
-        std::lock_guard<std::mutex> lock(pipe.view_mtx);
-        try {
-            pipe.view->deserialize(serialized);
-        } catch (const std::exception & e) {
-            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
-                "deserialize failed for %s: %s",
-                pipe.spec.topic.c_str(), e.what());
-            return;
-        }
-
-        std::string frame;
-        try { frame = pipe.view->read_string(pipe.spec.frame_field); }
-        catch (const std::exception & e) {
-            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
-                "frame_field '%s' unreadable on %s: %s",
-                pipe.spec.frame_field.c_str(), pipe.spec.topic.c_str(), e.what());
-        }
-
-        builtin_interfaces::msg::Time stamp_msg;
-        try {
-            const uint64_t t_us = pipe.view->read_time_us(pipe.spec.stamp_field);
-            stamp_msg.sec     = static_cast<int32_t>(t_us / 1'000'000ULL);
-            stamp_msg.nanosec = static_cast<uint32_t>((t_us % 1'000'000ULL) * 1000ULL);
-        } catch (const std::exception &) {}
-
-        const Origin3D o = lookup_origin(frame, stamp_msg);
-
-        std::vector<sg::msg::SmartData> sds;
-        try {
-            sds = sg::decompose(pipe.spec, *pipe.view, o.x, o.y, o.z);
-        } catch (const std::exception & e) {
-            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
-                "decompose failed for %s: %s",
-                pipe.spec.topic.c_str(), e.what());
-            return;
-        }
-
-        for (const auto & sd : sds) pipe.pub->publish(sd);
-        ++pipe.msgs;
-        pipe.sd_count += sds.size();
-    }
-
-    Origin3D lookup_origin(const std::string & sensor_frame,
-                            const builtin_interfaces::msg::Time & stamp)
-    {
-        if (sensor_frame.empty() || target_frame_.empty()) return {};
+        if (sensor_frame.empty() || target_frame_.empty()) return {0.0, 0.0, 0.0};
         try {
             const auto tf = tf_buffer_->lookupTransform(
                 target_frame_, sensor_frame, tf2_ros::fromMsg(stamp));
@@ -161,28 +111,36 @@ private:
                 RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
                     "TF %s → %s unavailable: %s — origin (0,0,0)",
                     target_frame_.c_str(), sensor_frame.c_str(), ex.what());
-                return {};
+                return {0.0, 0.0, 0.0};
             }
         }
     }
 
     void report_stats()
     {
-        for (const auto & p : pipes_) {
-            RCLCPP_INFO(get_logger(),
-                "stats: %-26s %zu msgs → %zu SD",
-                p->spec.topic.c_str(), p->msgs, p->sd_count);
+        for (const auto & [topic, count] : sd_counts_) {
+            RCLCPP_INFO(get_logger(), "stats: %-26s %zu SD broadcast",
+                        topic.c_str(), count);
         }
     }
 
     std::string target_frame_;
     int         stats_period_s_{5};
 
+    bool        enable_ros_mirror_{true};
+    std::string bus_group_;
+    int         bus_port_{0};
+    std::string bus_ifaddr_;
+
     std::shared_ptr<tf2_ros::Buffer>            tf_buffer_;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
 
-    std::vector<std::shared_ptr<SensorPipe>> pipes_;
-    rclcpp::TimerBase::SharedPtr             stats_timer_;
+    std::unique_ptr<sg::SDBus> bus_;
+
+    sg::gen::Subs subs_;
+    std::unordered_map<std::string, rclcpp::Publisher<sg::msg::SmartData>::SharedPtr> pubs_;
+    std::unordered_map<std::string, std::size_t> sd_counts_;
+    rclcpp::TimerBase::SharedPtr stats_timer_;
 };
 
 int main(int argc, char ** argv)
