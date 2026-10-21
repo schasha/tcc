@@ -3,20 +3,21 @@ gateway.launch.py — Semantic Gateway full-stack launch (synthetic source).
 
 Starts:
   1. demo_publisher_node  — synthetic LaserScan / IMU / Temperature + static TF
-  2. gateway_node         — ROS → SmartData translator. Broadcasts SmartData on
-                            UDP multicast (see docs/wire_format.md) and mirrors
-                            on /smartdata/* topics for debug.
-  3. sd_to_ros_node       — listens to the bus and republishes ROS messages on
-                            <topic>_recovered. Useful for end-to-end sanity.
+  2. gateway_node         — exports the ROS sensors/actuators as SmartData
+                            transducers on the SmartData network (UDP
+                            multicast, see docs/wire_format.md) and mirrors
+                            every update on /smartdata/* topics.
+  3. proxy_node           — announces interests, republishes the responses as
+                            ROS messages on <topic>_recovered and turns
+                            <topic>_command messages into SmartData commands.
 
-Fidelity validation lives in `test/test_validator.cpp` and
-`test/test_bus_roundtrip.cpp`; run via
+End-to-end fidelity is pinned by `test/test_bus_roundtrip.cpp`; run via
 `colcon test --packages-select semantic_gateway`.
 
 Usage:
   ros2 launch semantic_gateway gateway.launch.py
   ros2 launch semantic_gateway gateway.launch.py use_demo_publisher:=false
-  ros2 launch semantic_gateway gateway.launch.py enable_sd_to_ros:=false
+  ros2 launch semantic_gateway gateway.launch.py enable_proxy:=false
 """
 
 from launch import LaunchDescription
@@ -32,7 +33,7 @@ def generate_launch_description():
             "use_demo_publisher", default_value="true",
             description="Launch the synthetic sensor publisher (disable on real robots)"),
         DeclareLaunchArgument(
-            "enable_sd_to_ros", default_value="true",
+            "enable_proxy", default_value="true",
             description="Launch the bus → ROS recovery node"),
         DeclareLaunchArgument(
             "target_frame", default_value="map",
@@ -65,14 +66,14 @@ def generate_launch_description():
 
         Node(
             package="semantic_gateway",
-            executable="sd_to_ros_node",
-            name="sd_to_ros",
+            executable="proxy_node",
+            name="proxy",
             output="screen",
-            condition=IfCondition(LaunchConfiguration("enable_sd_to_ros")),
+            condition=IfCondition(LaunchConfiguration("enable_proxy")),
             arguments=["--ros-args", "--log-level", LaunchConfiguration("log_level")],
         ),
 
         LogInfo(msg="Generic Semantic Gateway stack launched. "
-                    "Inspect /smartdata/* topics or sniff the UDP multicast "
-                    "bus on 224.1.1.1:5000."),
+                    "Inspect /smartdata/* and *_recovered topics, or sniff the "
+                    "SmartData network on 224.1.1.1:5000."),
     ])

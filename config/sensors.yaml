@@ -1,17 +1,36 @@
-# sensors.yaml — Sensor translation table for the Semantic Gateway
+# sensors.yaml — transducer table of the Semantic Gateway
 #
-# three decomposition patterns cover all sensor_msgs/ types:
-#   scalar     — one SmartData per ROS message
-#   array      — N SmartData per ROS message, dev = element index
-#   composite  — several groups, each with its own unit (e.g. IMU)
+# Each entry is a ROS topic. The codegen turns it into one SmartData
+# Transducer class per physical quantity it carries (Fröhlich 2018 §2.1);
+# the instances of a class (vector elements, x/y/z components) are told
+# apart by their device id.
+#
+# Decomposition patterns:
+#   scalar     — one quantity, one instance           (Temperature)
+#   array      — one quantity, one instance per element (LaserScan beams)
+#   composite  — one transducer class per group, one instance per field (IMU)
+#
+# Per-entry timing (milliseconds):
+#   expiry_ms  how long a sample stays valid after it was produced; also the
+#              default expiry of the remote proxies. 0 = never expires.
+#   period_ms  local sampling period. 0 (default) = the transducer is active:
+#              every ROS message is an update. Must not exceed expiry_ms.
+#
+# Sensors are exported as ADVERTISED SmartData (mode: private keeps them
+# off the network); actuators are always COMMANDED.
+#
+# Actuators:
+#   frame        tf frame that locates the actuator (commands carry a region)
+#   coalesce_ms  each field is its own SmartData, so a remote write of the
+#                whole message arrives as one command per field; updates
+#                within this window are published as one setpoint (default 2)
 
 defaults:
   target_frame: map
 
 sensors:
 
-  # LaserScan
-  # 1 ROS scan → N SmartData (one per beam)
+  # LaserScan: 1 transducer class (length), 1 instance per beam
   - topic: /scan
     type: sensor_msgs/msg/LaserScan
     decomposition: array
@@ -23,18 +42,20 @@ sensors:
       max_field: range_max
     expiry_ms: 100
 
-  # IMU (synthetic publisher / general ROS)
-  # 1 ROS Imu → 6 SmartData (3 m·s⁻² + 3 rad·s⁻¹)
+  # IMU (synthetic publisher / general ROS):
+  # 2 transducer classes (acceleration, angular velocity) x 3 axes
   - topic: /imu/data
     type: sensor_msgs/msg/Imu
     decomposition: composite
     groups:
-      - unit: meter_per_sec_sq
+      - name: linear_acceleration
+        unit: meter_per_sec_sq
         fields:
           - linear_acceleration.x
           - linear_acceleration.y
           - linear_acceleration.z
-      - unit: rad_per_sec
+      - name: angular_velocity
+        unit: rad_per_sec
         fields:
           - angular_velocity.x
           - angular_velocity.y
@@ -46,20 +67,21 @@ sensors:
     type: sensor_msgs/msg/Imu
     decomposition: composite
     groups:
-      - unit: meter_per_sec_sq
+      - name: linear_acceleration
+        unit: meter_per_sec_sq
         fields:
           - linear_acceleration.x
           - linear_acceleration.y
           - linear_acceleration.z
-      - unit: rad_per_sec
+      - name: angular_velocity
+        unit: rad_per_sec
         fields:
           - angular_velocity.x
           - angular_velocity.y
           - angular_velocity.z
     expiry_ms: 10
 
-  # temperature
-  # 1 ROS Temperature → 1 SmartData. Converts °C → K
+  # temperature: converts °C → K
   - topic: /temperature
     type: sensor_msgs/msg/Temperature
     decomposition: scalar
@@ -76,3 +98,40 @@ sensors:
   #   value_field: fluid_pressure
   #   unit: pascal
   #   expiry_ms: 500
+
+actuators:
+
+  # velocity command of the mobile base: commanding these SmartData drives
+  # the robot (TurtleBot3 listens on /cmd_vel). `frame` locates the actuator.
+  - topic: /cmd_vel
+    type: geometry_msgs/msg/Twist
+    frame: base_link
+    decomposition: composite
+    groups:
+      - name: linear_velocity
+        unit: meter_per_second
+        fields:
+          - linear.x
+          - linear.y
+          - linear.z
+      - name: angular_velocity
+        unit: rad_per_sec
+        fields:
+          - angular.x
+          - angular.y
+          - angular.z
+    expiry_ms: 500
+
+# SmartData produced by other nodes (another gateway, an SDAV/EPOS node):
+# the proxy asks for them and publishes them on ROS. They have no local
+# transducer; device ids are the producer's. See docs/mapping.md §5.6.
+#
+# imports:
+#   - topic: /lab/temperature
+#     type: sensor_msgs/msg/Temperature
+#     decomposition: scalar
+#     unit: kelvin
+#     device: any
+#     value_field: temperature
+#     value_transform: { kind: linear, a: 1.0, b: 273.15 }
+#     frame_id: "sd_{device}"

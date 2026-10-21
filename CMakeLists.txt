@@ -45,7 +45,7 @@ set(NODE_DEPS
   ament_index_cpp
 )
 
-# ── Codegen: sensors.yaml → generated/parsed_{decompose,dispatch,recompose,sd_dispatch}.hpp ──
+# ── Codegen: sensors.yaml → generated/parsed_{transducers,gateway,proxies}.hpp ──
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 set(GEN_DIR  ${CMAKE_CURRENT_BINARY_DIR}/generated)
@@ -53,10 +53,9 @@ set(GEN_YAML ${CMAKE_CURRENT_SOURCE_DIR}/config/sensors.yaml)
 set(GEN_TOOL ${CMAKE_CURRENT_SOURCE_DIR}/codegen/generate.py)
 
 set(GEN_OUTS
-  ${GEN_DIR}/parsed_decompose.hpp
-  ${GEN_DIR}/parsed_dispatch.hpp
-  ${GEN_DIR}/parsed_recompose.hpp
-  ${GEN_DIR}/parsed_sd_dispatch.hpp
+  ${GEN_DIR}/parsed_transducers.hpp
+  ${GEN_DIR}/parsed_gateway.hpp
+  ${GEN_DIR}/parsed_proxies.hpp
 )
 
 add_custom_command(
@@ -65,16 +64,18 @@ add_custom_command(
   COMMAND ${Python3_EXECUTABLE} ${GEN_TOOL}
           --yaml ${GEN_YAML} --out ${GEN_DIR}
   DEPENDS ${GEN_YAML} ${GEN_TOOL}
-  COMMENT "Generating per-sensor codegen from ${GEN_YAML}"
+  COMMENT "Generating SmartData transducers from ${GEN_YAML}"
 )
 add_custom_target(gateway_codegen DEPENDS ${GEN_OUTS})
 
-# ── sd_bus library: UDP multicast SmartData wire bus ──────────────────────────
-add_library(sd_bus SHARED src/sd_bus.cpp)
-target_include_directories(sd_bus PUBLIC
+# ── smartdata_runtime: SmartData run-time (network, scheduler) ────────────────
+find_package(Threads REQUIRED)
+add_library(smartdata_runtime SHARED src/smartdata/network.cpp)
+target_include_directories(smartdata_runtime PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
 )
-target_link_libraries(sd_bus "${cpp_typesupport_target}")
+target_link_libraries(smartdata_runtime Threads::Threads)
 
 # ── gateway_node ──────────────────────────────────────────────────────────────
 add_executable(gateway_node src/gateway_node.cpp)
@@ -84,17 +85,17 @@ target_include_directories(gateway_node PUBLIC
   $<BUILD_INTERFACE:${GEN_DIR}>
 )
 ament_target_dependencies(gateway_node ${NODE_DEPS})
-target_link_libraries(gateway_node "${cpp_typesupport_target}" sd_bus)
+target_link_libraries(gateway_node "${cpp_typesupport_target}" smartdata_runtime)
 
-# ── sd_to_ros_node ────────────────────────────────────────────────────────────
-add_executable(sd_to_ros_node src/sd_to_ros_node.cpp)
-add_dependencies(sd_to_ros_node gateway_codegen)
-target_include_directories(sd_to_ros_node PUBLIC
+# ── proxy_node ────────────────────────────────────────────────────────────
+add_executable(proxy_node src/proxy_node.cpp)
+add_dependencies(proxy_node gateway_codegen)
+target_include_directories(proxy_node PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<BUILD_INTERFACE:${GEN_DIR}>
 )
-ament_target_dependencies(sd_to_ros_node ${NODE_DEPS})
-target_link_libraries(sd_to_ros_node "${cpp_typesupport_target}" sd_bus)
+ament_target_dependencies(proxy_node ${NODE_DEPS})
+target_link_libraries(proxy_node "${cpp_typesupport_target}" smartdata_runtime)
 
 # ── demo_publisher_node ───────────────────────────────────────────────────────
 add_executable(demo_publisher_node src/demo_publisher_node.cpp)
@@ -105,10 +106,10 @@ ament_target_dependencies(demo_publisher_node ${NODE_DEPS})
 target_link_libraries(demo_publisher_node "${cpp_typesupport_target}")
 
 # ── Install ───────────────────────────────────────────────────────────────────
-install(TARGETS gateway_node sd_to_ros_node demo_publisher_node
+install(TARGETS gateway_node proxy_node demo_publisher_node
   DESTINATION lib/${PROJECT_NAME}
 )
-install(TARGETS sd_bus
+install(TARGETS smartdata_runtime
   EXPORT export_${PROJECT_NAME}
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib
@@ -130,61 +131,62 @@ if(BUILD_TESTING)
   find_package(ament_lint_auto   REQUIRED)
   ament_lint_auto_find_test_dependencies()
 
-  # Unit tests: 32-bit dimensional SI unit encoding (Fig. 1 of the paper)
-  ament_add_gtest(test_si_units
-    test/test_si_units.cpp
-  )
+  # 32-bit dimensional SI unit encoding (Fig. 1 of the paper)
+  ament_add_gtest(test_si_units test/test_si_units.cpp)
   target_include_directories(test_si_units PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   )
 
-  # Integration test: full gateway pipeline with synthetic data (codegen path)
-  ament_add_gtest(test_gateway_pipeline
-    test/test_gateway_pipeline.cpp
-  )
+  # SmartData dynamic: interests, responses, periods, regions, commands
+  ament_add_gtest(test_smartdata_runtime test/test_smartdata_runtime.cpp TIMEOUT 120)
+  target_link_libraries(test_smartdata_runtime smartdata_runtime)
+
+  # Generated transducers + translation latency / throughput
+  ament_add_gtest(test_gateway_pipeline test/test_gateway_pipeline.cpp TIMEOUT 120)
   add_dependencies(test_gateway_pipeline gateway_codegen)
   target_include_directories(test_gateway_pipeline PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<BUILD_INTERFACE:${GEN_DIR}>
   )
   ament_target_dependencies(test_gateway_pipeline ${NODE_DEPS})
-  target_link_libraries(test_gateway_pipeline "${cpp_typesupport_target}")
+  target_link_libraries(test_gateway_pipeline "${cpp_typesupport_target}" smartdata_runtime)
 
-  # Fidelity test: ROS → decompose_<name> → feed_<name> → ROS (codegen pair)
-  ament_add_gtest(test_validator
-    test/test_validator.cpp
-  )
-  add_dependencies(test_validator gateway_codegen)
-  target_include_directories(test_validator PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<BUILD_INTERFACE:${GEN_DIR}>
-  )
-  ament_target_dependencies(test_validator ${NODE_DEPS})
-  target_link_libraries(test_validator "${cpp_typesupport_target}")
-
-  # Synthetic recompose: hand-built SmartData → dispatch_sd → reconstructed ROS
-  ament_add_gtest(test_synthetic_recompose
-    test/test_synthetic_recompose.cpp
-  )
-  add_dependencies(test_synthetic_recompose gateway_codegen)
-  target_include_directories(test_synthetic_recompose PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<BUILD_INTERFACE:${GEN_DIR}>
-  )
-  ament_target_dependencies(test_synthetic_recompose ${NODE_DEPS})
-  target_link_libraries(test_synthetic_recompose "${cpp_typesupport_target}")
-
-  # End-to-end bus roundtrip: ROS → gateway → UDP multicast → sd_to_ros → ROS
-  ament_add_gtest(test_bus_roundtrip
-    test/test_bus_roundtrip.cpp
-  )
+  # End to end: ROS → gateway → SmartData network → proxies → ROS (and commands back)
+  ament_add_gtest(test_bus_roundtrip test/test_bus_roundtrip.cpp TIMEOUT 120)
   add_dependencies(test_bus_roundtrip gateway_codegen)
   target_include_directories(test_bus_roundtrip PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<BUILD_INTERFACE:${GEN_DIR}>
   )
   ament_target_dependencies(test_bus_roundtrip ${NODE_DEPS})
-  target_link_libraries(test_bus_roundtrip "${cpp_typesupport_target}" sd_bus)
+  target_link_libraries(test_bus_roundtrip "${cpp_typesupport_target}" smartdata_runtime)
+
+  # Imports: SmartData of other nodes → proxy → ROS (own YAML, own headers)
+  set(GEN_TEST_DIR  ${CMAKE_CURRENT_BINARY_DIR}/generated_imports_test)
+  set(GEN_TEST_YAML ${CMAKE_CURRENT_SOURCE_DIR}/test/imports_test.yaml)
+  set(GEN_TEST_OUTS
+    ${GEN_TEST_DIR}/parsed_transducers.hpp
+    ${GEN_TEST_DIR}/parsed_gateway.hpp
+    ${GEN_TEST_DIR}/parsed_proxies.hpp
+  )
+  add_custom_command(
+    OUTPUT  ${GEN_TEST_OUTS}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${GEN_TEST_DIR}
+    COMMAND ${Python3_EXECUTABLE} ${GEN_TOOL}
+            --yaml ${GEN_TEST_YAML} --out ${GEN_TEST_DIR}
+    DEPENDS ${GEN_TEST_YAML} ${GEN_TOOL}
+    COMMENT "Generating SmartData transducers from ${GEN_TEST_YAML}"
+  )
+  add_custom_target(imports_test_codegen DEPENDS ${GEN_TEST_OUTS})
+
+  ament_add_gtest(test_imports test/test_imports.cpp TIMEOUT 120)
+  add_dependencies(test_imports imports_test_codegen)
+  target_include_directories(test_imports PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${GEN_TEST_DIR}>
+  )
+  ament_target_dependencies(test_imports ${NODE_DEPS})
+  target_link_libraries(test_imports "${cpp_typesupport_target}" smartdata_runtime)
 endif()
 
 ament_package()

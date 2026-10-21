@@ -1,294 +1,267 @@
-// test_gateway_pipeline.cpp — integration test for the codegen pipeline.
+// test_gateway_pipeline.cpp — the generated transducers (parsed_transducers.hpp)
+// and the cost of turning a ROS message into SmartData.
 //
-// Exercises the generated dispatch end-to-end:
-//   Source ──ROS msg──▶  InlineGateway (typed Subscription + decompose_<name>)
-//                          ──SmartData──▶ Sink (asserts unit + counts)
-//
-// This test pins the post-codegen contract: typed Subscription<T>, direct
-// member access, no introspection in the hot path.
+//   * each (topic x quantity) is one transducer class with its UNIT, TYPE
+//     and a disjoint device block; instances read their own field;
+//   * invalid vector elements keep their previous (expiring) value;
+//   * unit conversions are applied on the way in and undone on the way out;
+//   * actuator transducers write their field of the setpoint and publish it;
+//   * latency / throughput of the translation (Source → transducers →
+//     Responsive SmartData), with and without the network send.
 
 #include <algorithm>
-#include <atomic>
 #include <chrono>
+#include <cmath>
+#include <limits>
 #include <memory>
+#include <random>
 #include <thread>
-#include <tuple>
-#include <unordered_map>
 #include <vector>
 
 #include <gtest/gtest.h>
 
-#include "rclcpp/rclcpp.hpp"
+#include "geometry_msgs/msg/twist.hpp"
 #include "sensor_msgs/msg/imu.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "sensor_msgs/msg/temperature.hpp"
 
-#include "semantic_gateway/msg/smart_data.hpp"
 #include "si_units.hpp"
+#include "smartdata/network.hpp"
+#include "smartdata/smartdata.hpp"
+#include "parsed_transducers.hpp"
 
-#include "parsed_dispatch.hpp"
-
+namespace gen = semantic_gateway::gen;
 using namespace std::chrono_literals;
-namespace sg = semantic_gateway;
 
 namespace {
 
-constexpr int LASER_BEAMS = 100;
-
-// In-process gateway built on top of the generated register_all().
-// Same wiring as src/gateway_node.cpp, minus TF (origin hardcoded for the test).
-class InlineGateway : public rclcpp::Node
+sd::Origin origin_at(sd::Time t)
 {
-public:
-    InlineGateway() : rclcpp::Node("inline_gateway")
-    {
-        auto lookup = [](const std::string &,
-                          const builtin_interfaces::msg::Time &)
-            -> std::tuple<double,double,double> {
-            return {1.0, 2.0, 0.0};   // fixed origin; TF not under test here
-        };
+    sd::Origin o;
+    o.x = 1.0;
+    o.y = 2.0;
+    o.t = t;
+    o.confidence = 100;
+    return o;
+}
 
-        auto on_sd = [this](const std::string & out_topic,
-                             const sg::msg::SmartData & sd) {
-            auto it = pubs_.find(out_topic);
-            if (it == pubs_.end()) {
-                it = pubs_.emplace(out_topic,
-                    create_publisher<sg::msg::SmartData>(
-                        out_topic, rclcpp::QoS(200))).first;
-            }
-            it->second->publish(sd);
-            ++sd_counts_[out_topic];
-        };
-
-        subs_ = sg::gen::register_all(this, lookup, on_sd);
-    }
-
-    std::size_t sd_count(const std::string & out_topic) const
-    {
-        auto it = sd_counts_.find(out_topic);
-        return it == sd_counts_.end() ? 0 : it->second;
-    }
-
-private:
-    sg::gen::Subs subs_;
-    std::unordered_map<std::string, rclcpp::Publisher<sg::msg::SmartData>::SharedPtr> pubs_;
-    std::unordered_map<std::string, std::size_t> sd_counts_;
-};
-
-class Source : public rclcpp::Node
+sensor_msgs::msg::LaserScan make_scan(std::size_t beams, float value)
 {
-public:
-    Source() : rclcpp::Node("source")
-    {
-        laser_pub_ = create_publisher<sensor_msgs::msg::LaserScan>("/scan",        rclcpp::SensorDataQoS());
-        imu_pub_   = create_publisher<sensor_msgs::msg::Imu>      ("/imu/data",    rclcpp::SensorDataQoS());
-        temp_pub_  = create_publisher<sensor_msgs::msg::Temperature>("/temperature", 10);
-        laser_timer_ = create_wall_timer(100ms, [this] { publish_scan(); });
-        imu_timer_   = create_wall_timer( 20ms, [this] { publish_imu(); });
-        temp_timer_  = create_wall_timer(200ms, [this] { publish_temp(); });
-    }
-    std::atomic<std::size_t> scans{0}, imus{0}, temps{0};
-
-private:
-    void publish_scan()
-    {
-        sensor_msgs::msg::LaserScan s;
-        s.header.stamp = now(); s.header.frame_id = "laser_frame";
-        s.angle_min       = -static_cast<float>(M_PI);
-        s.angle_max       =  static_cast<float>(M_PI);
-        s.angle_increment = 2.0f * static_cast<float>(M_PI) / LASER_BEAMS;
-        s.range_min = 0.1f; s.range_max = 30.0f;
-        s.ranges.assign(LASER_BEAMS, 5.0f);
-        laser_pub_->publish(s); ++scans;
-    }
-    void publish_imu()
-    {
-        sensor_msgs::msg::Imu m;
-        m.header.stamp = now(); m.header.frame_id = "imu_frame";
-        m.linear_acceleration.z = 9.81;
-        imu_pub_->publish(m); ++imus;
-    }
-    void publish_temp()
-    {
-        sensor_msgs::msg::Temperature t;
-        t.header.stamp = now(); t.header.frame_id = "base_link";
-        t.temperature = 25.0;
-        temp_pub_->publish(t); ++temps;
-    }
-
-    rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr   laser_pub_;
-    rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr         imu_pub_;
-    rclcpp::Publisher<sensor_msgs::msg::Temperature>::SharedPtr temp_pub_;
-    rclcpp::TimerBase::SharedPtr laser_timer_, imu_timer_, temp_timer_;
-};
-
-class Sink : public rclcpp::Node
-{
-public:
-    Sink() : rclcpp::Node("sink")
-    {
-        auto qos = rclcpp::QoS(200);
-        sub_laser_ = create_subscription<sg::msg::SmartData>(
-            "/smartdata/scan", qos,
-            [this](sg::msg::SmartData::ConstSharedPtr m) {
-                if (m->unit == si_units::METER) ++laser;
-            });
-        sub_imu_ = create_subscription<sg::msg::SmartData>(
-            "/smartdata/imu/data", qos,
-            [this](sg::msg::SmartData::ConstSharedPtr m) {
-                if (m->unit == si_units::METER_PER_SEC_SQ) ++imu_accel;
-                else if (m->unit == si_units::RADIAN_PER_SECOND) ++imu_gyro;
-            });
-        sub_temp_ = create_subscription<sg::msg::SmartData>(
-            "/smartdata/temperature", 10,
-            [this](sg::msg::SmartData::ConstSharedPtr m) {
-                if (m->unit == si_units::KELVIN) ++temp;
-            });
-    }
-    std::atomic<std::size_t> laser{0}, imu_accel{0}, imu_gyro{0}, temp{0};
-private:
-    rclcpp::Subscription<sg::msg::SmartData>::SharedPtr sub_laser_, sub_imu_, sub_temp_;
-};
+    sensor_msgs::msg::LaserScan s;
+    s.header.frame_id = "laser_frame";
+    s.range_min = 0.1f;
+    s.range_max = 30.0f;
+    s.ranges.assign(beams, value);
+    return s;
+}
 
 }  // namespace
 
-class GatewayPipelineTest : public ::testing::Test {
-protected:
-    void SetUp() override
-    {
-        if (!rclcpp::ok()) rclcpp::init(0, nullptr);
-        gw_     = std::make_shared<InlineGateway>();
-        source_ = std::make_shared<Source>();
-        sink_   = std::make_shared<Sink>();
-        exec_   = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
-        exec_->add_node(gw_);
-        exec_->add_node(source_);
-        exec_->add_node(sink_);
-    }
-    void TearDown() override { exec_->cancel(); }
+TEST(Transducers, OneClassPerQuantityWithDisjointDevices)
+{
+    static_assert(gen::Scan_Transducer::UNIT == si_units::METER);
+    static_assert(gen::ImuDataLinearAcceleration_Transducer::UNIT == si_units::METER_PER_SEC_SQ);
+    static_assert(gen::ImuDataAngularVelocity_Transducer::UNIT == si_units::RADIAN_PER_SECOND);
+    static_assert(gen::Temperature_Transducer::UNIT == si_units::KELVIN);
+    static_assert(gen::CmdVelLinearVelocity_Transducer::UNIT == si_units::METER_PER_SECOND);
 
-    void run_for(std::chrono::milliseconds d)
+    static_assert(gen::Scan_Transducer::active);
+    static_assert(gen::Scan_Transducer::TYPE == gen::Scan_Transducer::SENSOR);
+    static_assert(gen::CmdVelLinearVelocity_Transducer::TYPE & gen::CmdVelLinearVelocity_Transducer::ACTUATOR);
+
+    EXPECT_EQ(gen::ImuDataLinearAcceleration_Transducer::DEVICES, 3u);
+    EXPECT_NE(gen::ImuDataLinearAcceleration_Transducer::DEV_BASE,
+              gen::ImuLinearAcceleration_Transducer::DEV_BASE)
+        << "same unit on two topics: different device blocks";
+    EXPECT_EQ(gen::ImuDataAngularVelocity_Transducer::DEV_BASE -
+              gen::ImuDataLinearAcceleration_Transducer::DEV_BASE, 0x10000u);
+}
+
+TEST(Transducers, CompositeInstancesReadTheirOwnField)
+{
+    sd::Source<sensor_msgs::msg::Imu> src;
+    using Acc  = gen::ImuDataLinearAcceleration_Transducer;
+    using Gyro = gen::ImuDataAngularVelocity_Transducer;
+    Acc  ay(Acc::DEV_BASE + 1, src);
+    Gyro wz(Gyro::DEV_BASE + 2, src);
+
+    sensor_msgs::msg::Imu m;
+    m.linear_acceleration.y = -0.5;
+    m.angular_velocity.z    = 0.25;
+    src.publish(m, origin_at(42));
+
+    EXPECT_DOUBLE_EQ(ay.read().value, -0.5);
+    EXPECT_DOUBLE_EQ(wz.read().value, 0.25);
+    EXPECT_EQ(ay.read().origin.t, 42);
+    EXPECT_DOUBLE_EQ(ay.read().origin.y, 2.0);
+}
+
+TEST(Transducers, InvalidBeamsKeepTheirExpiringValue)
+{
+    sd::Source<sensor_msgs::msg::LaserScan> src;
+    using Beam = gen::Scan_Transducer;
+    Beam b2(Beam::DEV_BASE + 2, src);
+
+    auto s = make_scan(4, 1.0f);
+    src.publish(s, origin_at(1));
+    EXPECT_FLOAT_EQ(b2.read().value, 1.0f);
+
+    s.ranges[2] = std::numeric_limits<float>::quiet_NaN();
+    src.publish(s, origin_at(2));
+    EXPECT_FLOAT_EQ(b2.read().value, 1.0f);
+    EXPECT_EQ(b2.read().origin.t, 1) << "no update: the old sample simply expires";
+
+    s.ranges[2] = 99.0f;  // beyond range_max
+    src.publish(s, origin_at(3));
+    EXPECT_EQ(b2.read().origin.t, 1);
+
+    s.ranges.resize(2);   // shorter scan: this beam does not exist now
+    src.publish(s, origin_at(4));
+    EXPECT_EQ(b2.read().origin.t, 1);
+}
+
+TEST(Transducers, TemperatureIsKelvinOnTheWire)
+{
+    sd::Source<sensor_msgs::msg::Temperature> src;
+    using T = gen::Temperature_Transducer;
+    T t(T::DEV_BASE, src);
+    sensor_msgs::msg::Temperature m;
+    m.temperature = 25.0;
+    src.publish(m, origin_at(1));
+    EXPECT_NEAR(t.read().value, 298.15, 1e-9);
+    EXPECT_NEAR(T::to_ros(t.read().value), 25.0, 1e-9);
+}
+
+TEST(Transducers, ActuatorWritesItsFieldOfTheSetpoint)
+{
+    std::vector<geometry_msgs::msg::Twist> published;
+    sd::Sink<geometry_msgs::msg::Twist> sink(
+        [&](const geometry_msgs::msg::Twist & m) { published.push_back(m); },
+        [] { return origin_at(7); });
+
+    using Lin = gen::CmdVelLinearVelocity_Transducer;
+    using Ang = gen::CmdVelAngularVelocity_Transducer;
+    Lin vx(Lin::DEV_BASE + 0, sink);
+    Ang wz(Ang::DEV_BASE + 2, sink);
+
+    vx.actuate(0.3);
+    wz.actuate(-1.0);
+    ASSERT_EQ(published.size(), 2u);
+    EXPECT_DOUBLE_EQ(published.back().linear.x, 0.3) << "setpoint keeps the other fields";
+    EXPECT_DOUBLE_EQ(published.back().angular.z, -1.0);
+    EXPECT_DOUBLE_EQ(vx.read().value, 0.3) << "actuators report their state";
+    EXPECT_EQ(vx.read().origin.t, 7);
+}
+
+// ── performance ──────────────────────────────────────────────────────────────
+//
+// Acceptance criterion (monografia, Plano de Experimentos): translating a
+// message must stay below 100 µs at p95, an order of magnitude under the
+// ~1 ms p95 floor of a ROS 2 hop for small payloads (Kronauer et al. 2021).
+// "Translation" = the ROS message reaches the transducers, every instance
+// updates and its Responsive SmartData is notified. The variant with an
+// interested proxy also builds and sends one 78-byte Response per beam.
+
+namespace {
+
+constexpr std::size_t BEAMS = 100;
+
+struct Scan_Rig {
+    explicit Scan_Rig(bool interested)
     {
-        const auto deadline = std::chrono::steady_clock::now() + d;
-        while (std::chrono::steady_clock::now() < deadline && rclcpp::ok()) {
-            exec_->spin_some(std::chrono::milliseconds(10));
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        sd::Network::Config c;
+        c.group = "224.1.1.10";
+        c.port  = static_cast<uint16_t>(std::uniform_int_distribution<int>(45000, 49000)(rng));
+        c.interest_refresh = 100ms;
+        net = std::make_unique<sd::Network>(c);
+        for (std::size_t i = 0; i < BEAMS; ++i) {
+            beams.push_back(std::make_unique<sd::Responsive_SmartData<gen::Scan_Transducer>>(
+                *net, gen::Scan_Transducer::DEV_BASE + static_cast<sd::Device_Id>(i),
+                100'000, sd::ADVERTISED, 0, src));
+        }
+        if (interested) {
+            proxy = std::make_unique<sd::Interested_SmartData<si_units::METER>>(
+                *net, sd::Region::everywhere(), 100'000, 0, sd::ALL);
+            const auto deadline = std::chrono::steady_clock::now() + 2s;
+            while (std::chrono::steady_clock::now() < deadline &&
+                   beams.back()->interested() == 0) {
+                std::this_thread::sleep_for(5ms);
+            }
         }
     }
 
-    std::shared_ptr<InlineGateway> gw_;
-    std::shared_ptr<Source>        source_;
-    std::shared_ptr<Sink>          sink_;
-    std::shared_ptr<rclcpp::executors::SingleThreadedExecutor> exec_;
+    std::mt19937 rng{std::random_device{}()};
+    sd::Source<sensor_msgs::msg::LaserScan> src;
+    std::unique_ptr<sd::Network> net;
+    std::vector<std::unique_ptr<sd::Responsive_SmartData<gen::Scan_Transducer>>> beams;
+    std::unique_ptr<sd::Interested_SmartData<si_units::METER>> proxy;
 };
 
-TEST_F(GatewayPipelineTest, FanOutMatchesConfig)
+struct Percentiles { double p50, p95; };
+
+Percentiles measure(Scan_Rig & rig, int n)
 {
-    run_for(1500ms);
-    const std::size_t scans = source_->scans;
-    const std::size_t imus  = source_->imus;
-    const std::size_t temps = source_->temps;
-    ASSERT_GT(scans, 5u);
-    ASSERT_GT(imus,  20u);
-
-    EXPECT_GE(sink_->laser.load(),     (scans * LASER_BEAMS * 7) / 10);
-    EXPECT_GE(sink_->imu_accel.load(), (imus  * 3 * 7) / 10);
-    EXPECT_GE(sink_->imu_gyro.load(),  (imus  * 3 * 7) / 10);
-    EXPECT_GE(sink_->temp.load(),      (temps * 7) / 10);
-    GTEST_LOG_(INFO) << "scans=" << scans << " laser_sd=" << sink_->laser
-                     << "\nimus=" << imus  << " accel="    << sink_->imu_accel
-                     << " gyro=" << sink_->imu_gyro
-                     << "\ntemps=" << temps << " temp_sd=" << sink_->temp;
-}
-
-// Direct microbenchmark of the generated decompose_scan().
-// No executor, no DDS — just the hot path.
-//
-// Acceptance criterion (monografia §6.3): p95 < 100 us — one order of
-// magnitude below the ~1 ms ROS 2 single-hop p95 floor for small payloads
-// reported by Kronauer et al. (SenSys 2021). The CI threshold below is
-// tightened another order of magnitude (20 us) to catch regressions early.
-TEST(CodegenLatency, DecomposeScanP95Under20us)
-{
-    sensor_msgs::msg::LaserScan s;
-    s.header.stamp.sec = 1234;
-    s.header.stamp.nanosec = 567000000;
-    s.header.frame_id = "laser_frame";
-    s.range_min = 0.1f;
-    s.range_max = 30.0f;
-    s.ranges.assign(LASER_BEAMS, 5.0f);
-
-    std::vector<sg::msg::SmartData> out;
-    out.reserve(LASER_BEAMS);
-
-    constexpr int N = 2000;
-    std::vector<double> latencies_us;
-    latencies_us.reserve(N);
-
-    for (int i = 0; i < N; ++i) {
-        out.clear();
+    auto scan = make_scan(BEAMS, 5.0f);
+    std::vector<double> us;
+    us.reserve(n);
+    for (int i = 0; i < n; ++i) {
+        const auto o = origin_at(1'000'000 + i);
         const auto t0 = std::chrono::steady_clock::now();
-        sg::gen::decompose_scan(s, 1.0, 2.0, 0.0, out);
+        rig.src.publish(scan, o);
         const auto t1 = std::chrono::steady_clock::now();
-        latencies_us.push_back(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count() / 1000.0);
+        us.push_back(std::chrono::duration<double, std::micro>(t1 - t0).count());
     }
-
-    ASSERT_EQ(out.size(), static_cast<std::size_t>(LASER_BEAMS));
-    std::sort(latencies_us.begin(), latencies_us.end());
-    const double p50 = latencies_us[N / 2];
-    const double p95 = latencies_us[(N * 95) / 100];
-    GTEST_LOG_(INFO) << "decompose_scan (codegen, " << LASER_BEAMS << " beams)"
-                     << "  p50=" << p50 << "us  p95=" << p95 << "us";
-    EXPECT_LT(p95, 20.0);
+    std::sort(us.begin(), us.end());
+    return {us[n / 2], us[(n * 95) / 100]};
 }
 
-// Throughput: how many ROS scans per second the codegen decompose can
-// sustain when nothing else competes for the CPU.
-//
-// Acceptance criterion (monografia §6.3): sustained rate at least 100x
-// the aggregate SmartData input rate declared in config/sensors.yaml
-// (LaserScan 360 beams x 10 Hz + Imu 6 fields x 100 Hz + Temperature 2 Hz
-//  ~= 4200 SmartData/s). At 100 beams/scan that maps to ~1200 scans/s.
-TEST(CodegenThroughput, DecomposeScanSustained)
+}  // namespace
+
+TEST(Performance, TranslationLatencyP95Under100us)
 {
-    sensor_msgs::msg::LaserScan s;
-    s.header.stamp.sec = 1;
-    s.header.frame_id = "laser_frame";
-    s.range_min = 0.1f;
-    s.range_max = 30.0f;
-    s.ranges.assign(LASER_BEAMS, 5.0f);
+    Scan_Rig rig(false);
+    const auto p = measure(rig, 20'000);
+    GTEST_LOG_(INFO) << "translate LaserScan (" << BEAMS << " beams): p50=" << p.p50
+                     << "us p95=" << p.p95 << "us";
+    EXPECT_LT(p.p95, 100.0);
+}
 
-    std::vector<sg::msg::SmartData> out;
-    out.reserve(LASER_BEAMS);
+TEST(Performance, TranslationPlusSendLatency)
+{
+    Scan_Rig rig(true);
+    ASSERT_GT(rig.beams.back()->interested(), 0u) << "the proxy must have bound";
+    const auto p = measure(rig, 2'000);
+    GTEST_LOG_(INFO) << "translate + send LaserScan (" << BEAMS << " responses): p50="
+                     << p.p50 << "us p95=" << p.p95 << "us";
+    EXPECT_LT(p.p95, 20'000.0);  // sanity bound; the value is reported
+}
 
-    constexpr auto BUDGET = std::chrono::milliseconds(500);
-    std::size_t iterations = 0;
+TEST(Performance, SustainedThroughput)
+{
+    // 100x the aggregate declared in config/sensors.yaml (~4200 SmartData/s:
+    // 360 beams x 10 Hz + 6 IMU fields x 100 Hz + temperature) = 4.2e5
+    // updates/s → 4200 scans/s of BEAMS (100) beams
+    Scan_Rig rig(false);
+    auto scan = make_scan(BEAMS, 5.0f);
+    std::size_t it = 0;
     const auto t0 = std::chrono::steady_clock::now();
-    while (std::chrono::steady_clock::now() - t0 < BUDGET) {
-        out.clear();
-        sg::gen::decompose_scan(s, 1.0, 2.0, 0.0, out);
-        ++iterations;
+    while (std::chrono::steady_clock::now() - t0 < 500ms) {
+        rig.src.publish(scan, origin_at(static_cast<sd::Time>(++it)));
     }
-    const auto elapsed_s = std::chrono::duration<double>(
-        std::chrono::steady_clock::now() - t0).count();
+    const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    const double scans = it / secs;
+    GTEST_LOG_(INFO) << "translation throughput: " << scans << " scans/s = "
+                     << scans * BEAMS << " SmartData updates/s";
+    EXPECT_GT(scans * BEAMS, 4.2e5);
 
-    const double scans_per_s    = iterations / elapsed_s;
-    const double sd_per_s       = scans_per_s * LASER_BEAMS;
-    GTEST_LOG_(INFO) << "decompose_scan throughput: "
-                     << scans_per_s << " scans/s = "
-                     << sd_per_s    << " SmartData/s ("
-                     << LASER_BEAMS << " beams/scan)";
-
-    // 1200 scans/s = 100x headroom over the aggregate declared in
-    // config/sensors.yaml (~4200 SmartData/s). See monografia §6.3.
-    EXPECT_GT(scans_per_s, 1200.0);
-}
-
-int main(int argc, char ** argv)
-{
-    ::testing::InitGoogleTest(&argc, argv);
-    const int rc = RUN_ALL_TESTS();
-    if (rclcpp::ok()) rclcpp::shutdown();
-    return rc;
+    Scan_Rig sending(true);
+    std::size_t sent_it = 0;
+    const auto s0 = std::chrono::steady_clock::now();
+    while (std::chrono::steady_clock::now() - s0 < 500ms) {
+        sending.src.publish(scan, origin_at(static_cast<sd::Time>(++sent_it)));
+    }
+    const double ssecs = std::chrono::duration<double>(std::chrono::steady_clock::now() - s0).count();
+    GTEST_LOG_(INFO) << "with network send: " << sent_it / ssecs << " scans/s = "
+                     << sending.net->sent() / ssecs << " datagrams/s";
+    EXPECT_GT(sent_it / ssecs * BEAMS, 4200.0) << "must at least keep up with the declared sensors";
 }

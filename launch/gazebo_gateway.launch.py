@@ -6,12 +6,13 @@ Moving-robot scenario for the proposta §3.3 ("robô em movimento"):
   1. Gazebo (gzserver, optionally gzclient) + world + spawn TurtleBot3 burger
   2. gateway_node      — ROS → SmartData, codegen-driven (config/sensors.yaml
                          baked at build time, covers /imu and /imu/data)
-  3. sd_to_ros_node    — listens to the UDP multicast bus, republishes ROS
+  3. proxy_node        — interested SmartData on the network, republishes ROS
                          messages on <topic>_recovered (proposta §3.3 validador
                          externo conectado apenas ao barramento DDS/IP)
-  4. cmd_vel publisher — drives the robot in a slow circle so TF is dynamic
+  4. cmd_vel_command   — drives the robot in a slow circle through SmartData
+                         commands (so TF is dynamic and actuation is exercised)
 
-Fidelity is also pinned by the test suite (`test_validator`, `test_bus_roundtrip`).
+Fidelity is also pinned by the test suite (`test_bus_roundtrip`).
 
 Usage:
   export TURTLEBOT3_MODEL=burger
@@ -49,7 +50,7 @@ def generate_launch_description():
             description="Launch gzclient (Gazebo GUI). Set to false for headless runs"),
         DeclareLaunchArgument(
             "drive",        default_value="true",
-            description="Publish a constant cmd_vel so the robot moves"),
+            description="Command a constant velocity (via SmartData) so the robot moves"),
         DeclareLaunchArgument(
             "target_frame", default_value="odom",
             description="Frame in which the gateway expresses sensor origins"),
@@ -116,21 +117,23 @@ def generate_launch_description():
             arguments=["--ros-args", "--log-level", LaunchConfiguration("log_level")],
         ),
 
-        # external SmartData consumer — reconstructs ROS messages from the bus
+        # remote SmartData side — interests rebuild the ROS messages, and
+        # <topic>_command messages become SmartData commands
         Node(
             package="semantic_gateway",
-            executable="sd_to_ros_node",
-            name="sd_to_ros",
+            executable="proxy_node",
+            name="proxy",
             output="screen",
             parameters=[{"use_sim_time": True}],
             arguments=["--ros-args", "--log-level", LaunchConfiguration("log_level")],
         ),
 
-        # cmd_vel publisher
+        # drives the robot through SmartData: each Twist on /cmd_vel_command is
+        # sent as commands to the COMMANDED /cmd_vel transducers of the gateway
         ExecuteProcess(
             condition=IfCondition(LaunchConfiguration("drive")),
             cmd=[
-                "ros2", "topic", "pub", "--rate", "10", "/cmd_vel",
+                "ros2", "topic", "pub", "--rate", "10", "/cmd_vel_command",
                 "geometry_msgs/msg/Twist",
                 "{linear: {x: 0.10, y: 0.0, z: 0.0}, "
                 "angular: {x: 0.0, y: 0.0, z: 0.30}}",
@@ -140,7 +143,7 @@ def generate_launch_description():
 
         LogInfo(msg=(
             "Generic Semantic Gateway stack launched on Gazebo. "
-            "Inspect /smartdata/* (DDS mirror) or sniff 224.1.1.1:5000 "
-            "(SmartData wire bus). Fidelity check via `colcon test`."
+            "Inspect /smartdata/* (ROS mirror), *_recovered, or sniff "
+            "224.1.1.1:5000 (SmartData network). Fidelity check via `colcon test`."
         )),
     ])

@@ -1,31 +1,90 @@
 # Mapeamento semântico ROS 2 → SmartData
 
-Este documento é a referência única do **mapeamento semântico**: como cada
-campo de uma mensagem ROS vira parte de uma SmartData. O layout binário do
-transporte está em `docs/wire_format.md`; a estrutura ROS/DDS espelhada
-está em `msg/SmartData.msg`. O paper de referência é Fröhlich (2018).
+Este documento é a referência do **mapeamento**: como um tópico ROS vira
+transducers SmartData, e como esses transducers se comportam na rede segundo
+a dinâmica de Fröhlich (2018). O formato binário das mensagens está em
+`docs/wire_format.md`.
 
 ---
 
-## 1. Codegen build-time
+## 1. Modelo: tópicos ROS como transducers
 
-A descrição declarativa dos sensores vive em `config/sensors.yaml`. Em
-build time, `codegen/generate.py` lê o YAML e emite quatro headers tipados
-em `build/generated/`:
+No paper, um SmartData é ligado a um **Transducer**, uma classe que declara
+a grandeza física que mede ou controla (`UNIT`, Fig. 1), se é sensor e/ou
+atuador (`TYPE`) e se avisa sozinha quando há dado novo (`active`, o caso
+"por interrupção"). Várias instâncias da mesma classe num nó são
+distinguidas pelo `dev`.
 
-| Header                       | Conteúdo                                                                  |
-|------------------------------|---------------------------------------------------------------------------|
-| `parsed_decompose.hpp`       | `decompose_<topic>(msg, ox, oy, oz, out)` por sensor                      |
-| `parsed_dispatch.hpp`        | `register_all(node, lookup, on_sd)` cria `Subscription<T>` por sensor     |
-| `parsed_recompose.hpp`       | `State_<topic>`, `feed_<topic>`, `flush_<topic>` para reconstrução tipada |
-| `parsed_sd_dispatch.hpp`     | `Consumers` + `dispatch_sd(c, sd)` roteia SD por `(unit, dev_base range)` |
+O gateway aplica isso aos tópicos ROS:
 
-Não há introspecção em runtime, nem parsing de YAML em runtime, nem string
-lookup de campo. Adicionar sensor = editar `sensors.yaml` + `colcon build`.
+| Conceito do paper                     | No gateway                                                        |
+|---------------------------------------|-------------------------------------------------------------------|
+| Transducer (uma classe por grandeza)  | uma classe por (tópico × grandeza): `/imu/data` → aceleração e velocidade angular |
+| instâncias distinguidas por `dev`     | eixos x/y/z, feixes do LiDAR: `dev = DEV_BASE + índice`           |
+| transducer ativo (interrupção)        | a chegada da mensagem ROS: a `Subscription` notifica os transducers |
+| `sense()` / `actuate()`               | leitura direta e tipada do campo / escrita do campo no setpoint   |
+| SmartData local (1º construtor)       | `Responsive_SmartData<T>(dev, expiry, mode, period)` por instância |
+| SmartData remoto (2º construtor)      | `Interested_SmartData<UNIT>(region, expiry, period, mode, device, fuser)` |
+| Origin(x, y, z, t)                    | `header.stamp` + tf2 (`frame_id` → `target_frame`)                 |
+| suporte de run-time (rede, tempo, local.) | `sd::Network` (UDP multicast), relógio ROS, tf2               |
+
+Como o sensor ROS não está no nó que roda o gateway, cada transducer
+carrega a origem da sua amostra, em vez de usar a posição do nó.
 
 ---
 
-## 2. Codificação dimensional da `unit` (Fig. 1 do paper)
+## 2. Dinâmica SmartData implementada (`include/smartdata/`)
+
+| Comportamento (paper §2)                                            | Onde                                    |
+|---------------------------------------------------------------------|-----------------------------------------|
+| **Modos** PRIVATE / ADVERTISED / COMMANDED                          | `Responsive_SmartData`, `mode`          |
+| ADVERTISED anuncia-se na rede e **só responde a quem tem interesse** | ADVERTISE no construtor; responde só com bindings |
+| **Interest** = unidade + região espaço-temporal + expiry + period (+ device) | `Interested_SmartData` → mensagem INTEREST |
+| period = 0 → **event-driven**: resposta a cada atualização          | `transducer_updated()`                  |
+| period > 0 → **time-triggered**: resposta a cada período; transducers passivos são amostrados | `tick()` no `Scheduler` |
+| períodos diferentes → amostragem no **MDC** dos períodos            | `reschedule_locked()`                   |
+| a resposta leva o **menor expiry** entre o próprio e os dos interesses | `response_expiry_locked()`           |
+| **expiry < period é inválido**                                      | `check_timing()` / interesse ignorado   |
+| ler um SmartData **expirado** dispara uma atualização (passivos)    | `Responsive_SmartData::value()`         |
+| `wait()` bloqueia até a próxima atualização                         | `wait()` nas duas classes               |
+| escrever num SmartData = novo **setpoint**; remoto → **Command** aos COMMANDED da região | `operator=(double)` |
+| **fuser**: com função de fusão, toda resposta passa por ela          | `Interested_SmartData`, parâmetro `fuser` |
+| revogar um interesse                                                | REVOKE no destrutor do proxy            |
+
+Adaptações à rede UDP (sem a confiabilidade do TSTP):
+
+- **interesses são estado "soft"**: o proxy reanuncia o interesse a cada
+  `interest_refresh` (1 s) e o produtor descarta um binding não renovado
+  por `interest_lease` (3,5 s). Isso cobre nós que entram depois e pacotes
+  perdidos;
+- um SmartData que ainda **não tem amostra** não responde (nem aos ticks
+  time-triggered);
+- a origem é marcada com `location_confidence`: 100 com tf exata, 50 com
+  a última tf conhecida, 0 sem tf.
+
+Não implementado: supressão de respostas no modo SINGLE (no paper, um nó
+deixa de responder se já ouviu outro responder), segurança (MAC/assinatura)
+e o roteamento multi-hop do TSTP. O segmento é um único domínio multicast.
+
+---
+
+## 3. Codegen build-time
+
+`codegen/generate.py` lê `config/sensors.yaml` e emite em `build/generated/`:
+
+| Header                   | Conteúdo                                                                 |
+|--------------------------|--------------------------------------------------------------------------|
+| `parsed_transducers.hpp` | uma classe Transducer por (tópico × grandeza): `UNIT`, `TYPE`, `active`, `DEV_BASE`, `DEVICES`, `to_si`/`to_ros`; sensores observam o `sd::Source<Msg>` do tópico, atuadores escrevem no `sd::Sink<Msg>` |
+| `parsed_gateway.hpp`     | `class Gateway`: subscriptions, sources/sinks e um `Responsive_SmartData` por instância (sensores ADVERTISED, atuadores COMMANDED) |
+| `parsed_proxies.hpp`     | `class Proxies`: um `Interested_SmartData` por classe de sensor (todas as instâncias, modo ALL) que reconstrói a mensagem ROS; um por instância de atuador, que transforma `<topic>_command` em Commands |
+
+O acesso aos campos é literal (`msg.linear_acceleration.x`): não há
+introspecção nem parsing de YAML em runtime. Adicionar um tópico = editar o
+YAML e recompilar; erros de campo viram erros de compilação.
+
+---
+
+## 4. Codificação dimensional da `unit` (Fig. 1 do paper)
 
 ```
 bit 31  30..29  28..27  26..24  23..21  20..18  17..15  14..12  11..9  8..6   5..3   2..0
@@ -39,80 +98,154 @@ bit 31  30..29  28..27  26..24  23..21  20..18  17..15  14..12  11..9  8..6   5.
 | M     |  2   | Modificador: 0=direct · 1=1/U · 2=log(U) · 3=1/log(U)                    |
 | sr…cd |  3×9 | Expoente da dimensão SI correspondente (offset +4, faixa −4…+3)          |
 
-Constantes em `include/si_units.hpp`: `METER`, `KILOGRAM`, `SECOND`,
-`AMPERE`, `KELVIN`, `MOLE`, `CANDELA`, `RADIAN`, `METER_PER_SECOND`,
-`METER_PER_SEC_SQ`, `RADIAN_PER_SECOND`, `NEWTON`, `PASCAL`, `VOLT`.
-
-Adicionar nova unidade: linha em `si_units.hpp` + entrada na tabela
+Todas as unidades do gateway usam N = Float64. Constantes em
+`include/si_units.hpp`; nova unidade = constante lá + entrada em
 `UNIT_TO_SYMBOL` de `codegen/generate.py`.
 
 ---
 
-## 3. DSL do `sensors.yaml`
+## 5. DSL do `sensors.yaml`
 
-### 3.1 Esquema geral
+### 5.1 Esquema geral
 
 ```yaml
 defaults:
-  target_frame: <world frame para TF lookup>     # default: map
+  target_frame: map
 
 sensors:
-  - topic:         </input/ros/topic>            # obrigatório
+  - topic:         </topic>                      # obrigatório
     type:          <pkg/msg/Type>                # obrigatório
     decomposition: scalar | array | composite    # obrigatório
-    stamp_field:   <dotted.path>                 # default: header.stamp
-    frame_field:   <dotted.path>                 # default: header.frame_id
-    expiry_ms:     <int>                         # validade em ms
-    output_topic:  </smartdata/...>              # default: /smartdata + topic
+    stamp_field:   header.stamp                  # default
+    frame_field:   header.frame_id               # default
+    expiry_ms:     <ms>                          # validade; 0 = não expira
+    period_ms:     <ms>                          # 0 (default) = transducer ativo
+    mode:          advertised | private          # default advertised
+    output_topic:  </smartdata/...>              # espelho ROS (default /smartdata + topic)
+
+actuators:
+  - topic:         </topic>
+    type:          <pkg/msg/Type>
+    decomposition: scalar | composite
+    frame:         <tf frame do atuador>         # usado para a região dos comandos
+    expiry_ms:     <ms>
+    coalesce_ms:   2                             # ver 5.5
 ```
 
-### 3.2 `scalar` — 1 SmartData por mensagem
+### 5.2 `scalar` — uma grandeza, uma instância
 
 ```yaml
 decomposition: scalar
-value_field:   <dotted.path>
-unit:          <unit_name>
-value_transform:                                 # opcional
-  kind: linear
-  a:    1.0                                      # value' = a*value + b
-  b:    273.15
+value_field:   temperature
+unit:          kelvin
+value_transform: { kind: linear, a: 1.0, b: 273.15 }   # SI = a·ROS + b
 ```
 
-Exemplo: `Temperature` em °C → SmartData em Kelvin (a=1, b=273.15). A
-reconstrução aplica a inversa `(v − b)/a`.
+`to_si` aplica a transformação na entrada; `to_ros`, a inversa
+`(v − b)/a`, na reconstrução e nos comandos.
 
-### 3.3 `array` — N SmartData por mensagem
+### 5.3 `array` — uma grandeza, uma instância por elemento
 
 ```yaml
 decomposition: array
-array_field: <dotted.path>
-unit:        <unit_name>
-filter:                                          # opcional
-  kind: none | finite | finite_within
-  min_field: <dotted.path>                       # só para finite_within
-  max_field: <dotted.path>
+array_field: ranges
+unit:        meter
+filter: { kind: finite_within, min_field: range_min, max_field: range_max }
 ```
 
-Cada índice `i` do vetor vira `SmartData(value=array[i], dev=dev_base+i)`.
-Elementos rejeitados pelo filtro não geram SmartData — o consumidor vê o
-índice como buraco (valor zero após o resize).
+As instâncias são criadas quando a primeira mensagem revela o tamanho do
+vetor. Um elemento inválido (filtro) **não atualiza** sua instância: o valor
+anterior continua com sua origem antiga e simplesmente expira.
 
-### 3.4 `composite` — vários grupos com unidades distintas
+### 5.4 `composite` — uma classe de transducer por grupo
 
 ```yaml
 decomposition: composite
 groups:
-  - unit: <unit_a>
-    fields: [<dotted.path>, ...]   # cada campo vira uma SmartData
-  - unit: <unit_b>
-    fields: [...]
+  - name: linear_acceleration       # vira ImuDataLinearAcceleration_Transducer
+    unit: meter_per_sec_sq
+    fields: [linear_acceleration.x, linear_acceleration.y, linear_acceleration.z]
+  - name: angular_velocity
+    unit: rad_per_sec
+    fields: [angular_velocity.x, angular_velocity.y, angular_velocity.z]
 ```
 
-Os dispositivos são alocados em ordem dentro do `dev_base` do sensor.
+Cada grupo é uma classe; cada campo, uma instância (`dev = DEV_BASE + i`).
+Cada grupo aceita seu próprio `value_transform`.
+
+### 5.5 Atuadores
+
+Um atuador é COMMANDED: um Command vindo da rede chama `actuate(v)`, que
+escreve `to_ros(v)` no seu campo do setpoint e publica a mensagem no tópico.
+Como cada campo é um SmartData próprio, escrever a mensagem inteira
+remotamente gera um Command por campo; atualizações dentro de
+`coalesce_ms` são publicadas como **um** setpoint, em vez de uma rajada de
+mensagens parcialmente atualizadas. `coalesce_ms: 0` publica a cada campo.
+
+### 5.6 Imports — SmartData de outros nós
+
+`sensors:` e `actuators:` descrevem o que **este** gateway exporta. A seção
+`imports:` descreve SmartData produzidos **em outro lugar** (outro gateway,
+um nó SDAV/EPOS, qualquer produtor com o layout de `docs/wire_format.md`)
+que o `proxy_node` deve pedir e publicar em ROS. O gateway não muda: um
+import não tem transducer local nem bloco de dispositivos — os `device` são
+os do produtor.
+
+```yaml
+imports:
+  # qualquer produtor de kelvin; uma mensagem por resposta
+  - topic: /lab/temperature            # tópico ROS publicado pelo proxy
+    type: sensor_msgs/msg/Temperature
+    decomposition: scalar
+    unit: kelvin                       # nome da seção 6 ou código de 32 bits (0x...)
+    device: any                        # padrão; ou um id específico
+    value_field: temperature
+    value_transform: { kind: linear, a: 1.0, b: 273.15 }   # ROS → SI, como em sensors
+    frame_id: "sd_{device}"            # opcional; {device} vira o id do produtor
+    region: { x: 3.0, y: 1.0, z: 0.0, radius: 5.0 }       # opcional (padrão: região do nó)
+    period_ms: 1000                    # opcional (padrão: parâmetro period_ms do nó)
+    expiry_ms: 0                       # padrão 0
+    stamp: origin                      # origin (padrão) | receive
+    exclude_local: true                # padrão
+
+  # vários dispositivos de um nó estrangeiro reconstruídos numa mensagem
+  - topic: /lab/accel
+    type: geometry_msgs/msg/Vector3
+    decomposition: composite
+    stamp_field: null                  # mensagem sem header
+    groups:
+      - name: accel
+        unit: meter_per_sec_sq
+        fields:
+          - { field: x, device: 10 }   # composite: dispositivo explícito por campo
+          - { field: y, device: 11 }
+          - { field: z, device: 12 }
+```
+
+| Chave           | Significado                                                                 |
+|-----------------|-----------------------------------------------------------------------------|
+| `decomposition` | `scalar` ou `composite` (sem `array`: o tamanho de um vetor estrangeiro não é conhecido) |
+| `unit`          | a do produtor, exatamente; um código cru aceita unidades sem nome na tabela da seção 6 |
+| `device`        | `any` = um interesse com `ANY_DEVICE`, todos os produtores daquela unidade; um id = só ele |
+| `frame_id`      | escrito no `header.frame_id`; com `{device}`, distingue produtores de um import `any` |
+| `region`        | esfera (metros, no frame do produtor) só para este import                   |
+| `stamp`         | `origin` = tempo de origem da amostra; `receive` = relógio do proxy na chegada (produtor com outra base de tempo) |
+| `stamp_field`   | `header.stamp` (padrão) ou `null` para mensagens sem header (`std_msgs/Float64`, `Vector3`) |
+| `exclude_local` | um import `any` ignora os dispositivos dos transducers deste pacote com a mesma unidade |
+
+Um import `scalar` com `device: any` publica uma mensagem por resposta,
+deduplicando por produtor (cada `device` tem a sua última origem). Um
+`composite` reconstrói a mensagem como na seção 8: os campos com a mesma
+origem temporal são uma amostra, então o produtor precisa dar o mesmo `t` a
+todos os campos de um instante.
+
+O codegen recusa: tópico já usado (inclusive `_recovered`/`_command`/espelho),
+`device` dentro do bloco de um transducer local da mesma unidade, `frame_id`
+sem header, `composite` sem `device` por campo, e `array`.
 
 ---
 
-## 4. Nomes de unidade reconhecidos
+## 6. Nomes de unidade reconhecidos
 
 | Nome YAML                          | Constante              | Dimensão                              |
 |------------------------------------|------------------------|---------------------------------------|
@@ -131,108 +264,74 @@ Os dispositivos são alocados em ordem dentro do `dev_base` do sensor.
 | `pascal` / `Pa`                    | PASCAL                 | `m=-1, kg=+1, s=-2`                   |
 | `volt` / `V`                       | VOLT                   | `m=+2, kg=+1, s=-3, A=-1`             |
 
-Nome desconhecido faz o codegen falhar com mensagem clara durante o build.
+---
+
+## 7. Numeração de dispositivos
+
+O codegen dá a cada **classe de transducer** um bloco disjunto de 16 bits:
+
+| Classe (ordem no YAML)          | DEV_BASE   | instâncias            |
+|---------------------------------|------------|-----------------------|
+| `Scan_Transducer`               | 0x00000    | 1 por feixe (≤ 65536) |
+| `ImuDataLinearAcceleration_…`   | 0x10000    | x, y, z               |
+| `ImuDataAngularVelocity_…`      | 0x20000    | x, y, z               |
+| classe k                        | k × 0x10000|                       |
+
+Assim duas classes com a mesma unidade no mesmo nó (`/imu` e `/imu/data`)
+nunca compartilham um `dev`, que é exatamente o papel do `dev` no paper.
+Os proxies usam o bloco para saber a qual mensagem cada resposta pertence.
 
 ---
 
-## 5. Discriminação de sensor no bus único — `(unit, dev_base range)`
+## 8. Reconstrução no lado remoto
 
-O bus UDP multicast carrega SmartData de todos os sensores no mesmo grupo
-(`224.1.1.1:5000`). Para o consumidor saber a qual sensor cada SD pertence,
-o codegen aloca um intervalo de `origin_device` por sensor, sequencialmente:
+`Proxies` agrupa as respostas pela origem temporal (`header.stamp`):
 
-| Posição no YAML | dev_base       | dev_range  |
-|-----------------|----------------|------------|
-| sensor 0        | 0x00000        | 0x10000    |
-| sensor 1        | 0x10000        | 0x10000    |
-| sensor i        | i × 0x10000    | 0x10000    |
+- **scalar**: publica a cada amostra nova;
+- **composite**: publica quando todos os campos da amostra chegaram (ou
+  quando chega uma amostra mais nova);
+- **array**: publica quando começa uma varredura nova, ou no `drain()`
+  periódico se a varredura parou de receber feixes.
 
-Cada sensor tem 16 bits de dispositivos (65535 máx). Para `array` isso
-limita feixes; para `composite` limita campos. Aumentar = mudar
-`DEV_RANGE_PER_SENSOR` em `codegen/generate.py`.
+Como os interesses usam `ANY_DEVICE`, um proxy recebe também as respostas
+de outras classes (e de outros nós) com a mesma unidade — por exemplo, os
+setpoints de `/cmd_vel` (rad/s) chegam ao proxy do IMU. Cada `on_<topic>`
+descarta os dispositivos que não são seus **antes** de mexer na amostra em
+construção.
 
-O dispatcher (`parsed_sd_dispatch.hpp`) roteia com
-`(unit guard, dev em [base, base+range))`.
+Amostras com origem já publicada são ignoradas, então interesses
+time-triggered (que repetem a amostra atual a cada período) não geram
+mensagens duplicadas.
 
----
-
-## 6. Sensores na configuração default (`config/sensors.yaml`)
-
-### LaserScan
-```yaml
-- topic: /scan
-  type:  sensor_msgs/msg/LaserScan
-  decomposition: array
-  array_field: ranges
-  unit:        meter
-  filter: { kind: finite_within, min_field: range_min, max_field: range_max }
-  expiry_ms: 100
-```
-N SmartData (uma por feixe). Feixes `inf`/`NaN`/fora-de-faixa filtrados.
-
-### Imu (`/imu/data` e `/imu`)
-```yaml
-- topic: /imu/data    # ou /imu para TurtleBot3
-  type:  sensor_msgs/msg/Imu
-  decomposition: composite
-  groups:
-    - unit: meter_per_sec_sq
-      fields: [linear_acceleration.x, .y, .z]
-    - unit: rad_per_sec
-      fields: [angular_velocity.x, .y, .z]
-  expiry_ms: 10
-```
-6 SmartData (3 m·s⁻² + 3 rad·s⁻¹). Quaternion fica de fora — é
-adimensional, fora do mundo SI da Fig. 1.
-
-### Temperature
-```yaml
-- topic: /temperature
-  type:  sensor_msgs/msg/Temperature
-  decomposition: scalar
-  value_field: temperature
-  value_transform: { kind: linear, a: 1.0, b: 273.15 }
-  unit: kelvin
-  expiry_ms: 500
-```
-1 SmartData em Kelvin (conversão °C → K aplicada no decompose; reconstrução
-aplica a inversa).
+Campos fora do SI (`range_min`, `angle_increment`, quaternions, `frame_id`,
+covariâncias…) **não** atravessam a SmartData: a reconstrução é exata sobre
+os campos declarados no YAML.
 
 ---
 
-## 7. Validador como reconstrução (proposta §3.3)
+## 9. Testes
 
-A fidelidade do gateway é definida operacionalmente: dada uma mensagem ROS
-`m`, o gateway produz um burst `S = decompose(m)`. Fidelidade vale quando
-`recompose(S) ≡ campos_relevantes(m)`.
-
-Dois testes ancoram isso:
-
-- `test/test_validator.cpp` — exercício direto do par codegen, sem
-  rede/DDS. Inclui asserção explícita de **MSE → 0** para o LaserScan
-  (proposta §3.3) e `EXPECT_NEAR` por campo para scalar e composite.
-- `test/test_bus_roundtrip.cpp` — atravessa o caminho completo
-  `ROS → gateway → UDP multicast → sd_to_ros → ROS`, validando que o
-  transporte preserva semântica bit a bit.
-
-Campos não-SI (`range_min`, `angle_increment`, quaternions, `frame_id`,
-covariâncias etc.) **não** atravessam a SmartData por design — são
-metadados de framing, não quantidades físicas. A reconstrução é exatamente
-do conjunto de campos que o spec elegeu como semânticos.
+| Suite                    | O que cobre                                                              |
+|--------------------------|--------------------------------------------------------------------------|
+| `test_si_units`          | codificação 32-bit da Fig. 1                                             |
+| `test_smartdata_runtime` | layout das mensagens; dinâmica: silêncio sem interesse, event-driven, time-triggered, região, device, revogação/lease, menor expiry, expiry < period, leitura expirada, `wait()`, Commands só a COMMANDED, fuser |
+| `test_gateway_pipeline`  | transducers gerados (unidades, blocos de dev, filtros, conversões, atuador) e latência/vazão da tradução |
+| `test_bus_roundtrip`     | ponta a ponta ROS → gateway → rede → proxies → ROS, e `<topic>_command` → Commands → `/cmd_vel`, com interesses event-driven e time-triggered; setpoints de mesma unidade não vazam no IMU recuperado |
+| `test_imports`           | `imports:` (gerado de `test/imports_test.yaml`): produtores estrangeiros por `device: any` separados por `frame_id`, transducer local não importado, dispositivo específico em mensagem sem header, composite, região própria e `stamp: receive` |
 
 ---
 
-## 8. Mapa do código relevante a este documento
+## 10. Mapa do código
 
-| Camada                  | Arquivo(s)                                       |
-|-------------------------|--------------------------------------------------|
-| Vocabulário SI          | `include/si_units.hpp`                           |
-| DSL parseada            | `config/sensors.yaml`                            |
-| Codegen                 | `codegen/generate.py`                            |
-| Decompose por sensor    | `build/generated/parsed_decompose.hpp` (gerado)  |
-| Dispatch ROS→bus        | `build/generated/parsed_dispatch.hpp` (gerado)   |
-| Recompose por sensor    | `build/generated/parsed_recompose.hpp` (gerado)  |
-| Dispatch bus→ROS        | `build/generated/parsed_sd_dispatch.hpp` (gerado)|
-| Factory envelope        | `include/sd_codec.hpp`                           |
-| Wire format binário     | `docs/wire_format.md` + `include/sd_wire.hpp`    |
-| IDL ROS/DDS (mirror)    | `msg/SmartData.msg`                              |
+| Camada                         | Arquivo(s)                                        |
+|--------------------------------|---------------------------------------------------|
+| Vocabulário SI                 | `include/si_units.hpp`                            |
+| Mensagens de rede              | `include/smartdata/wire.hpp`                      |
+| Rede + scheduler (run-time)    | `include/smartdata/network.hpp`, `src/smartdata/network.cpp` |
+| Transducer                     | `include/smartdata/transducer.hpp`                |
+| SmartData local e remoto       | `include/smartdata/smartdata.hpp`                 |
+| Ponte tópicos ROS ↔ transducers| `include/smartdata/ros.hpp`                       |
+| DSL / codegen                  | `config/sensors.yaml`, `codegen/generate.py`      |
+| Gerados                        | `build/generated/parsed_{transducers,gateway,proxies}.hpp` |
+| Nós                            | `src/gateway_node.cpp`, `src/proxy_node.cpp`      |
+| Espelho ROS (instrumentação)   | `msg/SmartData.msg`                               |

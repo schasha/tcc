@@ -1,0 +1,59 @@
+# imports_test.yaml — codegen input of test_imports.cpp
+#
+# One local sensor (so the proxy has a transducer of its own to tell apart
+# from foreign ones) and one import per feature of the `imports:` section.
+
+defaults:
+  target_frame: map
+
+sensors:
+  - topic: /temperature
+    type: sensor_msgs/msg/Temperature
+    decomposition: scalar
+    value_field: temperature
+    value_transform: { kind: linear, a: 1.0, b: 273.15 }
+    unit: kelvin
+    expiry_ms: 500
+
+imports:
+  # any producer of kelvin; one message per response, frame_id names it
+  - topic: /ext/temperature
+    type: sensor_msgs/msg/Temperature
+    decomposition: scalar
+    unit: kelvin
+    device: any
+    value_field: temperature
+    value_transform: { kind: linear, a: 1.0, b: 273.15 }
+    frame_id: "sd_{device}"
+
+  # one specific device, into a message without a header
+  - topic: /ext/level
+    type: std_msgs/msg/Float64
+    decomposition: scalar
+    unit: meter
+    device: 7
+    value_field: data
+    stamp_field: null
+
+  # three devices of a foreign node rebuilt as one message
+  - topic: /ext/accel
+    type: geometry_msgs/msg/Vector3
+    decomposition: composite
+    stamp_field: null
+    groups:
+      - name: accel
+        unit: meter_per_sec_sq
+        fields:
+          - { field: x, device: 10 }
+          - { field: y, device: 11 }
+          - { field: z, device: 12 }
+
+  # raw unit code (pascal), own region, stamped on arrival
+  - topic: /ext/pressure
+    type: sensor_msgs/msg/FluidPressure
+    decomposition: scalar
+    unit: 0xe48ea924
+    device: any
+    value_field: fluid_pressure
+    region: { x: 5.0, y: 5.0, z: 0.0, radius: 1.0 }
+    stamp: receive

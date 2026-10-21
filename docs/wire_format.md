@@ -1,61 +1,87 @@
-# SmartData wire format
+# Formato das mensagens SmartData na rede
 
-The semantic gateway publishes each SmartData both on a ROS topic (for
-debug) and on a UDP multicast bus that other SmartData systems can read.
-This document fixes the byte layout used on the bus.
+O paper deixa a codificação ao protocolo de comunicação ("the actual
+encoding of SmartData attributes in a network packet is protocol-dependent",
+Fröhlich 2018). O gateway segue o layout das mensagens TSTP da
+implementação do LISHA (SDAV, `smartdata.h`: `_Header`, `Interest`,
+`Response`, `Command`) na escala de 32 bits em centímetros, de modo que os
+offsets de cada campo coincidem com os daquela implementação. Definição em
+`include/smartdata/wire.hpp`; offsets verificados em
+`test/test_smartdata_runtime.cpp` (`Wire.LayoutMatchesTstpMessages`).
 
-The format mirrors the envelope from Fröhlich (2018) §3.1, Fig. 1:
+Todos os campos estão na ordem de bytes do host (little-endian em x86_64 e
+arm64), sem padding (`#pragma pack(1)`).
 
-    Origin(x, y, z, d, t) | Unit | Value | Expiry | MAC
+## Transporte
 
-It is **not** the SDAV TSTP frame — the gateway does not implement the
-TSTP control plane (interest, response, hop-by-hop trust). It only
-emits the data envelope a transducer would carry in its payload. SDAV
-adapters can subscribe to this stream directly because the envelope
-fields are the same.
+- grupo multicast `224.1.1.1`, porta UDP `5000` (parâmetros `bus_group`,
+  `bus_port`);
+- TTL 1 (um segmento de rede), loopback ligado: produtores e consumidores
+  podem dividir o host ou o processo;
+- uma mensagem por datagrama, entrega best-effort.
 
-## Byte layout (72 bytes, little-endian, packed)
+## Cabeçalho comum (60 B)
 
-| Offset | Size | Field           | Type     | Notes                                         |
-|--------|------|-----------------|----------|-----------------------------------------------|
-| 0      | 4    | `unit`          | u32      | dimensional SI identifier (see `si_units.hpp`) |
-| 4      | 8    | `value`         | f64      | IEEE-754 double                               |
-| 12     | 8    | `origin_x`      | f64      | meters, frame = `target_frame`                |
-| 20     | 8    | `origin_y`      | f64      |                                               |
-| 28     | 8    | `origin_z`      | f64      |                                               |
-| 36     | 4    | `origin_device` | u32      | element index (arrays) or 0                   |
-| 40     | 8    | `origin_time`   | u64      | µs since UNIX epoch                           |
-| 48     | 8    | `expiry`        | u64      | µs, relative to `origin_time`                 |
-| 56     | 16   | `mac`           | u8[16]   | Poly1305-AES (out of scope — zeros for now)   |
+| Offset | Tam. | Campo                 | Conteúdo                                                        |
+|--------|------|-----------------------|-----------------------------------------------------------------|
+| 0      | 1    | `config`              | escala [7:6] = 3 (32 bits, cm) · time request [5] · tipo [4:3] · versão [2:0] = 4 |
+| 1      | 1    | `mode`                | modo [1:0] · operação [3:2] · subtipo [7:4]                     |
+| 2      | 1    | `misc`                | incerteza do valor (respostas)                                  |
+| 3      | 1    | `location_confidence` | 0–100 %: 100 tf exata, 50 última tf conhecida, 0 desconhecida   |
+| 4      | 12   | `origin.x/y/z`        | int32, cm, no `target_frame` do gateway                         |
+| 16     | 8    | `origin.t`            | int64, µs (relógio ROS; `header.stamp` da amostra)              |
+| 24     | 4    | `unit`                | unidade SI de 32 bits (Fig. 1, `si_units.hpp`)                  |
+| 28     | 4    | `device`              | instância do transducer (`DEV_BASE + índice`); `0xFFFFFFFF` = qualquer, em interesses/comandos |
+| 32     | 8    | `signature`           | 0 (sem camada de segurança)                                     |
+| 40     | 20   | `last_hop.x/y/z/t`    | = origem (segmento de um salto)                                 |
 
-Total: **72 bytes**.
+Tipos (`config[4:3]`): 0 INTEREST, 1 RESPONSE, 2 COMMAND, 3 CONTROL (não usado).
 
-## Endianness and packing
+Modos (`mode`):
 
-Wire bytes are little-endian. The C++ struct in `include/sd_wire.hpp`
-uses `#pragma pack(push,1)` so `sizeof(SDWire) == 72` on any platform
-the gateway targets (x86_64, arm64 — both little-endian). A static
-assert in the header pins this.
+| Mensagem      | modo [1:0]                         | operação [3:2]                         |
+|---------------|------------------------------------|----------------------------------------|
+| INTEREST      | 0 SINGLE · 1 ALL                   | 0 ANNOUNCE · 1 REVOKE                  |
+| RESPONSE      | 0 PRIVATE · 1 ADVERTISED · 3 COMMANDED | 0 ADVERTISE · 1 CONCEAL · 2 RESPOND |
+| COMMAND       | 0 SINGLE · 1 ALL                   | —                                      |
 
-There is no marshalling step: `to_wire(sd)` returns a `SDWire` with the
-right fields, and `std::memcpy` it into the UDP payload. The receiver
-does the inverse with `from_wire`.
+## Interest (104 B)
 
-## Transport
+| Offset | Tam. | Campo        |                                                    |
+|--------|------|--------------|----------------------------------------------------|
+| 0      | 60   | cabeçalho    | `unit`, `device` pedidos; origem = quem pede       |
+| 60     | 12   | região x/y/z | centro, int32 cm                                   |
+| 72     | 4    | raio         | uint32 cm                                          |
+| 76     | 16   | t0, t1       | int64 µs (intervalo de interesse)                  |
+| 92     | 8    | expiry       | int64 µs, relativo                                 |
+| 100    | 4    | period       | int32 µs; 0 = event-driven                         |
 
-- Multicast group: **224.1.1.1**
-- UDP port: **5000**
-- TTL: 1 (single LAN segment by default)
-- One SmartData per datagram (72-byte payload, no batching for now)
+## Response (70 B + valor)
 
-These match SDAV's `_MCAST_GRP` / `_MCAST_PORT` so SDAV transducers
-listening on the same group can interpret the envelope without changes.
+| Offset | Tam. | Campo      |                                                         |
+|--------|------|------------|---------------------------------------------------------|
+| 0      | 60   | cabeçalho  | origem e incerteza da amostra                           |
+| 60     | 8    | expiry     | o menor entre o do SmartData e os dos interesses        |
+| 68     | 2    | fragment   | 0 (valores escalares nunca fragmentam)                  |
+| 70     | 8    | valor      | IEEE-754 binary64 (unit N = Float64)                    |
 
-## What this format does *not* include
+RESPOND leva o valor (78 B). ADVERTISE/CONCEAL anunciam o SmartData sem
+valor (70 B).
 
-- TSTP control headers (interest, response codes, hop count)
-- TSTP timestamp sync deltas
-- batch framing — each datagram is one SmartData
-- the `MAC` field is currently zero; integrity/auth is left for future
-  work (the field is reserved in the layout so adding it later does not
-  shift offsets)
+## Command (84 B + valor)
+
+| Offset | Tam. | Campo      |                                                         |
+|--------|------|------------|---------------------------------------------------------|
+| 0      | 60   | cabeçalho  | origem = centro da região e t0                          |
+| 60     | 4    | raio       | uint32 cm                                               |
+| 64     | 8    | t1         | int64 µs                                                |
+| 72     | 8    | expiry     | int64 µs                                                |
+| 80     | 4    | period     | int32 µs                                                |
+| 84     | 8    | valor      | novo setpoint, binary64                                 |
+
+## O que não está incluído
+
+- `signature`/MAC e mensagens CONTROL de segurança e sincronização de
+  relógio do TSTP: fora do escopo;
+- roteamento multi-hop (o `last_hop` só repete a origem);
+- valores digitais e fragmentação: o gateway só emite grandezas SI escalares.

@@ -5,9 +5,9 @@
   <version>0.1.0</version>
   <description>
     Semantic Gateway for ROS 2 to SmartData translation.
-    Translates ROS 2 sensor messages into SmartData format (IDL over DDS),
-    enriching raw sensor data with semantic, spatial, and temporal metadata
-    for integration with Cyber-Physical Systems.
+    Exports ROS 2 sensors and actuators as SmartData transducers
+    (Froehlich 2018): unit, origin in space and time, expiry, and the
+    interest/response/command dynamic over a UDP multicast network.
   </description>
   <maintainer email="davimenegazjunkes@hotmail.com">Davi Menegaz Junkes</maintainer>
   <license>Apache-2.0</license>
