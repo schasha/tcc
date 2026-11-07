@@ -14,6 +14,7 @@
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <ostream>
 #include <random>
 #include <thread>
 #include <vector>
@@ -197,7 +198,13 @@ struct Scan_Rig {
     std::unique_ptr<sd::Interested_SmartData<si_units::METER>> proxy;
 };
 
-struct Percentiles { double p50, p95; };
+struct Percentiles { double min, p5, p50, p95, p99, max; };
+
+std::ostream & operator<<(std::ostream & os, const Percentiles & p)
+{
+    return os << "min=" << p.min << "us p5=" << p.p5 << "us p50=" << p.p50
+              << "us p95=" << p.p95 << "us p99=" << p.p99 << "us max=" << p.max << "us";
+}
 
 Percentiles measure(Scan_Rig & rig, int n)
 {
@@ -212,7 +219,8 @@ Percentiles measure(Scan_Rig & rig, int n)
         us.push_back(std::chrono::duration<double, std::micro>(t1 - t0).count());
     }
     std::sort(us.begin(), us.end());
-    return {us[n / 2], us[(n * 95) / 100]};
+    return {us.front(), us[(n * 5) / 100], us[n / 2], us[(n * 95) / 100],
+            us[(n * 99) / 100], us.back()};
 }
 
 }  // namespace
@@ -221,8 +229,7 @@ TEST(Performance, TranslationLatencyP95Under100us)
 {
     Scan_Rig rig(false);
     const auto p = measure(rig, 20'000);
-    GTEST_LOG_(INFO) << "translate LaserScan (" << BEAMS << " beams): p50=" << p.p50
-                     << "us p95=" << p.p95 << "us";
+    GTEST_LOG_(INFO) << "translate LaserScan (" << BEAMS << " beams): " << p;
     EXPECT_LT(p.p95, 100.0);
 }
 
@@ -231,8 +238,7 @@ TEST(Performance, TranslationPlusSendLatency)
     Scan_Rig rig(true);
     ASSERT_GT(rig.beams.back()->interested(), 0u) << "the proxy must have bound";
     const auto p = measure(rig, 2'000);
-    GTEST_LOG_(INFO) << "translate + send LaserScan (" << BEAMS << " responses): p50="
-                     << p.p50 << "us p95=" << p.p95 << "us";
+    GTEST_LOG_(INFO) << "translate + send LaserScan (" << BEAMS << " responses): " << p;
     EXPECT_LT(p.p95, 20'000.0);  // sanity bound; the value is reported
 }
 
