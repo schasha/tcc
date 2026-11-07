@@ -217,39 +217,40 @@ Universidade Federal de Santa Catarina\\[1cm]
 \begin{resumo}
 A convergência entre robótica móvel e Internet das Coisas é central para a
 implementação dos Sistemas Ciber-Físicos. O \textit{Robot Operating System 2}
-(ROS 2) consolidou-se como o padrão no desenvolvimento robótico e
-adotou o \textit{Data Distribution Service} (DDS) como \textit{middleware}
-de comunicação, garantindo entrega eficiente de mensagens. As mensagens
-nativas do ROS, porém, transmitem dados brutos de sensores sem o contexto
-físico e temporal necessário para sistemas de tomada de decisão autônoma.
-O conceito de \textit{SmartData}, proposto por Fröhlich (2018), responde a
-essa lacuna ao encapsular cada leitura sensorial em um envelope que carrega,
-inseparavelmente do valor, sua unidade no Sistema Internacional, a origem
-espaço-temporal do dado e seu prazo de validade. Mais do que um formato, o
-SmartData define uma dinâmica de transdutores: produtores anunciados na rede
-respondem aos interesses de consumidores remotos, a cada atualização ou
-periodicamente, e atuadores são comandados pela escrita de um novo valor.
-Este trabalho projeta, implementa e avalia um \textit{Gateway} semântico
-que exporta sensores e atuadores ROS 2 como transdutores SmartData e importa mensagens no formato
-SmartData para redes ROS 2. Um
-descritor YAML enumera os tópicos ROS e suas regras de decomposição, e um
-gerador em Python emite, em tempo de compilação, uma classe de transdutor
-por grandeza física e os objetos SmartData que a exportam. As mensagens de
-interesse, resposta e comando seguem o layout de mensagens TSTP
- e são difundidas em UDP multicast;
-um nó \textit{proxy} reconstrói as mensagens ROS a partir das respostas e
-recebe também SmartData de outros produtores. A validação em ambiente
-conteinerizado mediu uma latência de tradução de \SI{8.3}{\micro\second} no
-95º percentil para uma varredura LiDAR de 100 feixes, uma ordem de grandeza
-abaixo do critério de \SI{100}{\micro\second} derivado do piso de latência
-do ROS 2 para cargas pequenas, entre \SI{1}{\milli\second} e
-\SI{3}{\milli\second}; o envio das 100 respostas pela rede eleva o custo
-para até \SI{2.5}{\milli\second}, dominado por uma chamada de sistema por
-SmartData. Em simulação, as mensagens recuperadas exclusivamente pela rede
-SmartData mantiveram as taxas originais dos sensores, e o robô foi
+(ROS 2) consolidou-se como o padrão no desenvolvimento robótico e adotou o
+\textit{Data Distribution Service} (DDS) como \textit{middleware} de
+comunicação, garantindo entrega eficiente de mensagens. As mensagens nativas do
+ROS, porém, transmitem dados brutos de sensores sem o contexto físico e
+temporal necessário para sistemas de tomada de decisão autônoma. O conceito de
+\textit{SmartData}, proposto por Fröhlich (2018), responde a essa lacuna ao
+encapsular cada leitura sensorial em um envelope que carrega, inseparavelmente
+do valor, sua unidade no Sistema Internacional, a origem espaço-temporal do
+dado e seu prazo de validade. Mais do que um formato, o SmartData associa cada dado a um transdutor,
+que abstrai um sensor, um atuador ou uma transformação de dados. Os
+interesses declarados entre SmartData formam uma rede pela qual os
+produtores respondem a consumidores remotos e os atuadores recebem
+comandos. Este trabalho projeta, implementa e
+avalia um \textit{Gateway} semântico que exporta sensores e atuadores ROS 2
+como transdutores SmartData e importa mensagens no formato SmartData para redes
+ROS 2. Um descritor YAML enumera os tópicos ROS e suas regras de decomposição,
+e um gerador em Python, executado no \textit{build} antes da compilação, emite
+uma classe de transdutor por grandeza física e os objetos SmartData que a
+exportam. As mensagens de interesse, resposta e comando seguem o layout de
+mensagens TSTP e são difundidas em UDP multicast; um nó \textit{proxy}
+reconstrói as mensagens ROS a partir das respostas e recebe também SmartData de
+outros produtores. A validação em ambiente conteinerizado mediu uma latência de
+tradução de \SI{8.3}{\micro\second} no 95º percentil para uma varredura LiDAR
+de 100 feixes, uma ordem de grandeza abaixo do critério de
+\SI{100}{\micro\second}, adotado como um décimo do piso de latência do ROS 2
+para cargas pequenas como reportado em \citeonline{kronauer2021latency}; o envio das 100 respostas pela
+rede eleva o custo para até \SI{2.5}{\milli\second}, dominado pela chamada
+de sistema \texttt{sendto} executada para cada SmartData, que é enviado em um
+datagrama UDP próprio. Em simulação no Gazebo, com um robô TurtleBot3 Burger equipado com LiDAR e
+IMU, as mensagens recuperadas exclusivamente
+pela rede SmartData mantiveram as taxas originais dos sensores, e o robô foi
 conduzido por comandos SmartData. Os resultados sustentam a viabilidade de
-integrar robôs ROS 2 a ecossistemas SmartData sem comprometer o desempenho
-do laço de controle.
+integrar robôs ROS 2 a ecossistemas SmartData sem comprometer o desempenho do
+laço de controle.
 
 \vspace{1cm}
 \noindent\textbf{Palavras-chave:}
@@ -280,12 +281,13 @@ ambientes inteligentes, integrada a infraestruturas de instrumentação,
 controle e analítica que extrapolam os limites do robô.
 
 No domínio do desenvolvimento robótico, o \textit{Robot Operating System}
-(ROS) estabeleceu-se como o padrão de fato para a construção de sistemas
+(ROS) estabeleceu-se como o padrão para a construção de sistemas
 complexos. O ROS 2 introduziu uma mudança arquitetural significativa ao
 substituir seu transporte próprio pelo \textit{Data Distribution Service}
-(DDS), um padrão da OMG voltado a sistemas distribuídos de tempo real
+(DDS), um padrão do \textit{Object Management Group} (OMG) voltado a sistemas distribuídos de tempo real
 \cite{maruyama2016ros2,macenski2022ros2}. Paralelamente, no contexto de
-IoT industrial e cidades inteligentes, o conceito de \textit{SmartData},
+sistemas ciber-físicos em geral, de IoT industrial e cidades inteligentes
+a veículos autônomos, o conceito de \textit{SmartData},
 proposto por \citeonline{frohlich2018smartdata}, oferece uma abordagem
 orientada a dados que enriquece a informação bruta com metadados de
 semântica, localização e validade temporal, tornando cada leitura sensorial
@@ -293,9 +295,8 @@ um objeto autocontido.
 
 Apesar de coexistirem no mesmo nicho de aplicações ciber-físicas, os dois
 modelos de dados operam em níveis distintos de abstração. As mensagens
-nativas do ROS são projetadas para a eficiência do laço de controle
-e expõem campos numéricos ou estruturas pouco anotadas, das quais o
-significado semântico, como, unidade física, validade temporal e referencial
+do ROS expõem campos numéricos ou estruturas pouco anotadas, das quais o
+significado semântico, como unidade física, validade temporal e referencial
 espaço-temporal, é convenção do projeto, não dependente da
 mensagem. O SmartData, por sua vez, encapsula essas informações no próprio
 envelope, mas é difundido em um barramento próprio incompatível com o
@@ -315,7 +316,7 @@ laços de controle robóticos ou perdem metadados durante a serialização.
 Formula-se, portanto, a seguinte questão de pesquisa: como viabilizar a
 interoperabilidade semântica entre sistemas robóticos baseados em ROS 2 e
 plataformas de CPS orientadas a SmartData, mantendo os requisitos de tempo
-real e baixo \textit{overhead} de processamento?
+real e baixa sobrecarga de processamento?
 
 \section{Hipótese}
 \label{sec:hipotese}
@@ -323,10 +324,12 @@ real e baixo \textit{overhead} de processamento?
 Este trabalho conjectura que é possível desenvolver um componente operando
 nativamente no ecossistema ROS 2 capaz de interceptar, enriquecer e
 retransmitir mensagens de sensores no formato SmartData, com uma latência
-de \textit{marshaling} pequena o suficiente para não afetar o funcionamento
+de tradução, que compreende a extração dos campos, a conversão para
+unidades do SI, o enriquecimento com a origem espaço-temporal e o registro
+no SmartData, pequena o suficiente para não afetar o funcionamento
 dos demais subsistemas. Assume-se que, ao realizar a tradução dentro do
-próprio nó ROS, aproveitando as proprias informações do ecossistema
-para preencher os metadados  referentes de uma mensagem 
+próprio nó ROS, aproveitando as próprias informações do ecossistema
+para preencher os metadados de uma mensagem
 SmartData, elimina-se a necessidade de \textit{brokers} externos
 complexos, preservando a integridade semântica dos dados.
 
@@ -371,8 +374,10 @@ integridade semântica, espacial e temporal dos dados originais.
     \item Implementar o \textit{Gateway} como nó nativo do ROS 2,
     aproveitando a árvore de transformações e o relógio do próprio
     ecossistema para enriquecer cada amostra com sua origem espaço-temporal.
-    \item Exportar cada grandeza como SmartData segundo a dinâmica de
-    transdutores proposta por \citeonline{frohlich2018smartdata}, com
+    \item Exportar cada grandeza como SmartData segundo o modelo de
+    execução de transdutores, isto é, a forma como os SmartData anunciam,
+    respondem a interesses e recebem comandos ao longo do tempo, proposto
+    por \citeonline{frohlich2018smartdata}, com
     modos de operação, interesses orientados a eventos e periódicos,
     regiões espaço-temporais, validade e comandos, em mensagens com o
     \textit{layout} do TSTP difundidas em UDP multicast, oferecendo como
@@ -401,9 +406,11 @@ redundantes prevista pelo conceito original.
 \chapter{Fundamentação Teórica}
 \label{cap:fundamentacao}
 
-Este capítulo apresenta os três pilares conceituais sobre os quais o
+Este capítulo apresenta os conceitos sobre os quais o
 \textit{Gateway} foi construído: Sistemas Ciber-Físicos como contexto da
-demanda por dados semanticamente ricos, o ROS 2 como plataforma robótica
+demanda por dados semanticamente ricos, os sistemas de tempo real e a
+comunicação \textit{publish-subscribe} como fundamentos das exigências
+temporais e do modelo de comunicação envolvidos, o ROS 2 como plataforma robótica
 baseada em DDS, e o conceito de SmartData como abstração de dados e de
 transdutores em redes de sensores. Cada seção descreve as definições, propriedades e
 limitações que motivaram decisões de projeto adotadas nos capítulos
@@ -432,6 +439,70 @@ emergentes da implementação. Esse argumento da base à adoção de mecanismos
 como o \textit{Data Distribution Service} pelo ROS 2 e ao enriquecimento
 temporal dos pacotes SmartData no presente trabalho.
 
+\section{Sistemas de Tempo Real}
+\label{sec:tempo-real}
+
+Um sistema de tempo real é, segundo \citeonline{kopetz2011realtime}, um
+sistema cujo comportamento correto depende não apenas do resultado lógico
+das computações, mas também do instante em que esses resultados são
+produzidos. Cada resultado está associado a um prazo (\textit{deadline}),
+e a classificação do sistema decorre da consequência de perdê-lo: em
+sistemas de tempo real críticos (\textit{hard}), a perda de um prazo pode
+causar danos graves, como no controle de um veículo; em sistemas não
+críticos (\textit{soft}), o resultado atrasado ainda tem utilidade,
+embora reduzida. O autor destaca, além disso, que uma observação do mundo
+físico tem precisão temporal limitada: a imagem que o computador mantém de
+uma grandeza física só é válida por um intervalo após a observação, findo
+o qual o estado real pode já ter mudado. Essa noção corresponde
+diretamente à validade carregada por cada SmartData.
+
+A caracterização temporal de um sistema de tempo real envolve, por isso,
+mais do que o desempenho médio. A latência mede o intervalo entre um
+evento e a resposta do sistema, a variação da latência (\textit{jitter})
+mede a dispersão desse intervalo entre ativações, e o tempo de resposta
+no pior caso é o limite que precisa ser garantido para que os prazos
+sejam cumpridos \cite{kopetz2011realtime}. Esses conceitos se aplicam
+diretamente ao \textit{Gateway} proposto. Ele se insere no caminho entre
+os sensores e os consumidores dos dados, como controladores e sistemas de
+decisão, e todo o tempo gasto na tradução se soma à latência desse
+caminho e consome parte do prazo do laço de controle. Por esse motivo, o
+custo da tradução é avaliado em relação ao piso de latência do próprio
+ROS 2, e não em termos absolutos. Além disso, como sistemas operacionais
+de propósito geral produzem caudas longas na distribuição de latências,
+a avaliação reporta percentis elevados em vez da média. Por fim, a
+validade que o \textit{Gateway} atribui a cada SmartData expressa a
+precisão temporal da observação, permitindo que o consumidor descarte um
+dado que, ao chegar, já não representa o estado do mundo físico.
+
+\section{Comunicação Publish-Subscribe}
+\label{sec:pubsub}
+
+No modelo de comunicação \textit{publish-subscribe}, os consumidores
+registram junto a um serviço de eventos o seu interesse por determinados
+dados, enquanto os produtores publicam esses dados sem saber quem os
+receberá, cabendo ao serviço entregar cada publicação a todos os
+assinantes interessados \cite{eugster2003pubsub}. De acordo com
+\citeonline{eugster2003pubsub}, o modelo se caracteriza por desacoplar as
+partes em três dimensões: no espaço, já que produtores e consumidores não
+precisam conhecer uns aos outros, no tempo, uma vez que não precisam
+participar da interação simultaneamente, e na sincronização, visto que
+nem a publicação nem a recepção bloqueiam o fluxo principal de execução.
+Os autores distinguem, além disso, duas formas de assinatura. Na
+assinatura por tópico, o consumidor escolhe um canal nomeado, e
+na assinatura por conteúdo, ele seleciona os dados por meio de
+predicados sobre os seus atributos.
+
+As duas plataformas envolvidas neste trabalho adotam esse modelo, embora
+com formas de assinatura diferentes. O ROS 2, por meio do DDS, emprega
+tópicos identificados por nome e tipo de mensagem, cuja entrega é regulada por políticas de
+qualidade de serviço, como detalhado na Seção~\ref{sec:ros2}. Já no
+SmartData, um interesse funciona como uma assinatura por
+conteúdo, pois o consumidor não nomeia um produtor nem um canal, e sim a
+grandeza física, por meio da unidade, além da região espaço-temporal e do
+período desejados, de modo que todo produtor que satisfaz esses critérios
+responde. Assim, o \textit{Gateway} proposto opera na fronteira entre um
+modelo orientado a tópicos e um modelo orientado a conteúdo.
+
 \section{Robot Operating System 2}
 \label{sec:ros2}
 
@@ -440,27 +511,36 @@ sistemas robóticos; o ROS 2 é seu sucessor, redesenhado para abordar
 limitações herdadas da primeira versão em segurança, tempo real e
 operação em redes não ideais \cite{macenski2022ros2}. A diferença
 arquitetural mais relevante para este trabalho é a substituição do
-transporte original do ROS 1 pelo DDS, um padrão da \textit{Object
-Management Group} para comunicação dirigida a dados, baseado no modelo
+transporte original do ROS 1 pelo DDS, um padrão do OMG para comunicação dirigida a dados, baseado no modelo
 publish/subscribe com descoberta distribuída e configurações de qualidade
 de serviço (QoS) \cite{maruyama2016ros2}.
 
 \subsection{Modelo de Comunicação}
-No modelo de comunicação do ROS 2, processos (\textit{nodes}) publicam e
-assinam tópicos identificados por nome e tipo de mensagem. Cada tipo de
-mensagem é definido em uma linguagem de descrição de interface, a
-\textit{Interface Definition Language} (IDL) usada pelo DDS, e
-compilado a estruturas de dados nativas em C++ e Python. O publicador
-serializa uma instância da mensagem segundo o IDL e a entrega à camada
-DDS, que a roteia para todos os assinantes interessados de acordo com a
-política de QoS associada ao tópico.
+No ROS 2, uma aplicação é composta por processos, chamados nós
+(\textit{nodes}), que se comunicam principalmente pela publicação e
+assinatura de tópicos, identificados por um nome e por um tipo de
+mensagem. Os tipos de mensagem são descritos em arquivos de interface e
+convertidos pelo próprio ROS para a \textit{Interface Definition Language}
+(IDL) do DDS, a partir da qual são geradas estruturas de dados nativas em
+C++ e Python. Ao publicar, o nó serializa a mensagem e a entrega à camada
+DDS, que a encaminha a todos os assinantes do tópico de acordo com a
+política de qualidade de serviço (QoS) associada a ele. Além dos tópicos,
+o ROS 2 oferece serviços e ações para interações do tipo requisição e
+resposta, que não são utilizados neste trabalho.
 
-A qualidade de serviço é configurável por tópico e abrange, entre outros,
-profundidade do histórico, confiabilidade (\textit{reliable} ou
-\textit{best-effort}), durabilidade e prazos. O ROS 2 oferece perfis
-nomeados como \texttt{SensorDataQoS}, otimizado para dados sensoriais de
-alta frequência, e \texttt{SystemDefaultsQoS}, que herda a configuração
-padrão do \textit{middleware}.
+A política de QoS é configurada por tópico e combina, entre outros, os
+seguintes parâmetros: o histórico, que define se apenas as últimas \(N\)
+mensagens são mantidas ou todas elas; a confiabilidade, que pode ser
+\textit{reliable}, com retransmissão das mensagens perdidas, ou
+\textit{best effort}, sem retransmissão; e a durabilidade, que determina
+se assinantes que chegam depois recebem mensagens já publicadas. O ROS 2
+oferece perfis prontos para casos comuns. O perfil \texttt{SensorDataQoS},
+voltado a sensores de alta frequência, usa entrega \textit{best effort},
+durabilidade volátil e histórico das últimas cinco mensagens, priorizando
+a amostra mais recente em vez da entrega de todas, já que uma leitura
+atrasada de sensor perde rapidamente o seu valor. O perfil
+\texttt{SystemDefaultsQoS}, por sua vez, não fixa nenhum desses
+parâmetros e adota os valores padrão da implementação de DDS em uso.
 
 \subsection{Implementação por Camadas}
 A pilha do ROS 2 segue uma estratificação clara
@@ -478,22 +558,28 @@ A latência de comunicação do ROS 2 foi caracterizada em diversos estudos.
 sobre o DDS bruto varia significativamente conforme o cenário, com valores
 da ordem de centenas de microssegundos para mensagens pequenas em
 processos distintos. \citeonline{kronauer2021latency} estenderam essa
-análise para sistemas com múltiplos nós e mostraram que o ROS 2 pode
-introduzir até 50\% de \textit{overhead} sobre o DDS bruto para mensagens
-pequenas, com valores típicos no 95º percentil entre uma e três
-milissegundos para cargas de \SI{128}{\byte} a \SI{500}{\kilo\byte} em
+análise para sistemas com múltiplos nós e mostraram que a pilha do ROS 2
+pode acrescentar até 50\% de sobrecarga à latência do DDS bruto para
+mensagens pequenas. A latência de ponta a ponta, isto é, o intervalo
+entre a publicação de uma mensagem e a sua entrega ao assinante, ficou
+tipicamente entre \SI{1}{\milli\second} e \SI{3}{\milli\second} no 95º
+percentil, para cargas de \SI{128}{\byte} a \SI{500}{\kilo\byte} em
 configurações representativas. Esses dados são a referência mais
-diretamente comparável ao \textit{overhead} adicional que um tradutor
+diretamente comparável à sobrecarga adicional que um tradutor
 para SmartData deve evitar reintroduzir.
 
 \subsection{Árvore de Transformações}
-O subsistema \texttt{tf2} do ROS mantém uma árvore de transformações
-geométricas entre quadros de referência, indexada no tempo. Cada par de
-quadros é vinculado por uma transformação contínua, e consultas sobre essa
-árvore retornam, para um instante específico, a transformação resultante
-da composição ao longo de um caminho da árvore. Essa estrutura é a fonte
-canônica para preencher os campos de origem espacial do SmartData a partir
-do \texttt{frame\_id} declarado no cabeçalho das mensagens de sensor.
+Cada sensor de um robô mede o mundo a partir do seu próprio ponto de
+vista, isto é, em relação a um quadro de referência (\textit{frame})
+definido por uma posição e uma orientação. O subsistema \texttt{tf2} do
+ROS mantém, ao longo do tempo, as transformações que relacionam esses
+quadros, organizadas em uma árvore cuja raiz é um quadro global, como o
+mapa ou a origem da odometria. Uma consulta à árvore retorna, para um
+instante específico, a transformação entre dois quadros quaisquer, obtida
+pela composição das transformações ao longo do caminho que os liga. Essa
+estrutura é a fonte canônica para preencher a origem espacial do
+SmartData a partir do \texttt{frame\_id} declarado no cabeçalho das
+mensagens de sensor.
 
 \section{O Conceito de SmartData}
 \label{sec:smartdata}
@@ -513,11 +599,32 @@ codificada como inteiro de 32 bits que descreve a dimensão SI da grandeza
 sensoriada, as coordenadas \((x, y, z)\) da origem espacial, um
 \textit{timestamp} de alta resolução, um prazo de validade
 (\textit{expiry}) relativo ao instante de produção e um código de
-autenticação. A unidade é codificada com um bit de tipo (físico/digital),
+autenticação. A confiabilidade do dado é expressa por dois campos
+adicionais: a incerteza associada à medição e o grau de confiança, de 0 a
+100\%, na localização informada. A unidade é codificada com um bit de tipo (físico/digital),
 dois bits para o tipo numérico, dois bits para um modificador (direto,
 inverso, logarítmico) e nove campos de três bits para os expoentes das
-sete dimensões fundamentais do SI mais radiano e esterradiano, conforme
-ilustrado na Figura~1 do trabalho original.
+sete dimensões fundamentais do SI mais radiano e esterradiano, conforme a
+Figura~\ref{fig:unidade}. Cada expoente é armazenado somado de 4, de modo
+que os três bits representam valores de \(-4\) a \(+3\).
+
+\begin{figure}[htb]
+  \centering
+  \caption{Codificação da unidade SI em 32 bits}
+  \label{fig:unidade}
+  \footnotesize
+  \setlength{\tabcolsep}{3pt}
+  \begin{tabular}{*{12}{|c}|}
+    \multicolumn{1}{c}{31} & \multicolumn{1}{c}{30--29} & \multicolumn{1}{c}{28--27} &
+    \multicolumn{1}{c}{26--24} & \multicolumn{1}{c}{23--21} & \multicolumn{1}{c}{20--18} &
+    \multicolumn{1}{c}{17--15} & \multicolumn{1}{c}{14--12} & \multicolumn{1}{c}{11--9} &
+    \multicolumn{1}{c}{8--6} & \multicolumn{1}{c}{5--3} & \multicolumn{1}{c}{2--0} \\
+    \hline
+    1 & NUM & MOD & sr+4 & rad+4 & m+4 & kg+4 & s+4 & A+4 & K+4 & mol+4 & cd+4 \\
+    \hline
+  \end{tabular}
+  \legend{Fonte: adaptado de \citeonline{frohlich2018smartdata}.}
+\end{figure}
 
 Essa codificação produz, por exemplo, a constante \texttt{METER} com
 expoente \(+1\) na dimensão de comprimento e zero nas demais;
@@ -531,7 +638,10 @@ sem necessidade de tabelas de tradução externas.
 O \textit{timestamp} de origem é expresso em microssegundos contados a
 partir de uma época absoluta, por padrão, a época UNIX. A validade
 relativa permite que o consumidor avalie, a qualquer instante, se o dado
-ainda é semanticamente utilizável: um valor lido após o vencimento foi
+ainda é semanticamente utilizável, desde que os relógios do produtor e do
+consumidor estejam sincronizados, já que a comparação envolve o
+\textit{timestamp} atribuído pelo primeiro e o relógio local do segundo:
+um valor lido após o vencimento foi
 produzido em um ponto do passado em que as condições físicas observadas
 podem já não corresponder ao estado atual do sistema. Em
 \citeonline{frohlich2019datacentric}, a validade é discutida como um
@@ -546,7 +656,35 @@ constante \texttt{UNIT} segundo a codificação descrita acima
 \cite{frohlich2018smartdata}. Um SmartData cujo transdutor declara Kelvin
 representa a grandeza temperatura e pode abstrair tanto um sensor quanto
 um atuador, como um condicionador de ar. Instâncias de SmartData são
-criadas por um de dois construtores.
+criadas por um de dois construtores, mostrados na
+Figura~\ref{fig:sd-classe}.
+
+\begin{figure}[htb]
+  \centering
+  \caption{Interface da classe SmartData}
+  \label{fig:sd-classe}
+  \begin{tikzpicture}[font=\footnotesize\sffamily,
+      row/.style={anchor=north west, inner sep=2pt},
+      note/.style={draw, fill=white, inner sep=3pt}]
+    \node[row] (c1) at (0,-0.55) {+Smart\_Data(dev, expiry, period, mode)};
+    \node[row] (c2) at (0,-1.0)  {+Smart\_Data(region, expiry, period, fuser)};
+    \node[row] (m1) at (0,-1.45) {+operator Value(): Value};
+    \node[row] (m2) at (0,-1.9)  {+location(): Coordinates};
+    \node[row] (m3) at (0,-2.35) {+time(): Time};
+    \node[row] (m4) at (0,-2.8)  {+wait()};
+    \draw (0,0) rectangle ([xshift=2pt]c2.east |- 0,-3.3) coordinate (se);
+    \draw (0,-0.5) -- (se |- 0,-0.5);
+    \node[font=\footnotesize\sffamily\bfseries] at ($(0,-0.25)!0.5!(se |- 0,-0.25)$) {Smart\_Data};
+    \node[draw, dashed, anchor=south] (tr) at ([xshift=-1cm]se |- 0,0) {Transducer};
+    \node[note, above=0.3cm of tr] (unit) {define UNIT};
+    \draw (unit) -- (tr);
+    \node[note, anchor=west] (loc) at ([xshift=0.6cm]se |- c1) {transdutor local};
+    \node[note, anchor=west] (rem) at ([xshift=0.6cm,yshift=-6pt]se |- c2) {transdutor remoto};
+    \draw[densely dotted] (c1.east) -- (loc.west);
+    \draw[densely dotted] (c2.east) -- (rem.west);
+  \end{tikzpicture}
+  \legend{Fonte: adaptado de \citeonline{frohlich2018smartdata}.}
+\end{figure}
 
 O primeiro construtor abstrai transdutores locais e recebe, além do
 transdutor, um identificador de dispositivo (\texttt{dev}), a validade, o
@@ -560,10 +698,12 @@ bloqueia até a sinalização. Três modos de operação são definidos: no modo
 anunciado na rede, no modo \emph{anunciado}, ele pode ser monitorado
 remotamente e no modo \emph{comandado}, além de anunciado, pode ser
 controlado remotamente. O modo comandado é o que distingue o conceito de
-outras infraestruturas de sensoriamento: em vez de enviar comandos a
-atuadores, a aplicação escreve um novo valor, que funciona como
-\textit{setpoint}, e os atuadores da unidade correspondente localizados na
-região designada reagem coletivamente para alcançá-lo.
+outras infraestruturas de sensoriamento: em vez de enviar comandos
+diretamente a atuadores, a aplicação escreve um novo valor, que funciona
+como \textit{setpoint}, isto é, como a referência a ser atingida pela
+grandeza na região designada. Cabe então a um sistema de controle
+associado aos transdutores dessa região comparar essa referência com o
+estado medido e acionar os atuadores para alcançá-la.
 
 O segundo construtor cria \emph{proxies} locais de transdutores remotos.
 Seu primeiro parâmetro é uma região espaço-temporal de interesse,
@@ -580,20 +720,26 @@ conforme o período e a função de fusão do interesse
 \cite{frohlich2018smartdata}. Período zero indica que todas as
 atualizações dos nós remotos devem ser reportadas, definindo uma operação
 orientada a eventos (\textit{event-driven}), já outros valores exigem uma
-resposta a cada período, de \(t_0\) a \(t_f\), definindo uma operação
+resposta a cada período, durante o intervalo de tempo definido por
+\([t_0, t_f]\), definindo uma operação
 disparada por tempo (\textit{time-triggered}). Quando SmartData distintos
 usam o mesmo transdutor com períodos diferentes, a amostragem ocorre no
-máximo divisor comum dos períodos, embora cada objeto continue a observar
+máximo divisor comum dos períodos, embora cada SmartData interessado
+continue a observar
 o seu período original. Sem função de fusão, um SmartData responde ao
 interesse apenas se ainda não ouviu a resposta de outro nó, e o valor do
 \textit{proxy} é o da última resposta recebida, e com função de fusão,
 todos os transdutores que satisfazem o critério respondem, e cada nova
 resposta é entregue à função, cujo retorno define o valor do SmartData.
 
-A validade é relativa ao instante de produção do dado e é renovada a cada
-atualização, assim como o período é relativo; especificar uma validade
-menor que o período é inválido. Nos \textit{proxies}, a validade é uma
-informação do cliente: vários objetos que representam o mesmo transdutor
+A validade (\textit{expiry}) indica por quanto tempo, a partir do
+instante de produção, o valor de um SmartData continua representando
+adequadamente a grandeza observada. Ela é expressa de forma relativa e
+renovada a cada atualização, de modo que um dado produzido no instante
+\(t\) com validade \(e\) pode ser usado até \(t + e\). Depois disso, o
+valor é considerado vencido, e acessá-lo dispara uma nova atualização do
+transdutor \cite{frohlich2018smartdata}. Nos \textit{proxies}, a validade
+é uma informação do cliente: vários SmartData que representam o mesmo transdutor
 remoto podem adotar validades distintas. Os nós que exportam SmartData
 anunciados gerenciam as respostas de modo a atender a todos os interesses
 e usam, no pacote de rede, a menor das validades envolvidas.
@@ -626,28 +772,51 @@ monografia em relação a elas.
 \label{sec:rel-perf}
 
 \citeonline{maruyama2016ros2} produziram a primeira caracterização
-sistemática do desempenho do ROS 2 sobre DDS. Os autores descrevem a
-arquitetura em camadas, comparam fornecedores e medem latência e vazão
-sob configurações variáveis de QoS, tamanho de mensagem e número de
-processos. Sua contribuição central é demonstrar que o desempenho do
-ROS 2 depende fortemente do par \textit{rmw}/DDS escolhido e da
-configuração de QoS, e que ganhos significativos podem ser obtidos pela
-seleção criteriosa desses parâmetros para o cenário de aplicação.
+sistemática do desempenho do ROS 2 sobre DDS, ainda em uma versão alfa,
+comparando-o ao ROS 1 e a três implementações de DDS: Connext, OpenSplice
+e FastRTPS. Os autores mediram latência de ponta a ponta, vazão, número
+de \textit{threads} e consumo de memória. Para isso, variaram o tamanho da
+mensagem de \SI{256}{\byte} a \SI{4}{\mega\byte} e a disposição dos nós,
+que podiam estar em máquinas distintas, na mesma máquina ou no mesmo
+processo. Quanto à QoS, foram definidos dois perfis. O perfil confiável
+usa histórico completo, entrega \textit{reliable} e durabilidade
+\textit{transient local}, de modo que assinantes que chegam depois ainda
+recebem as mensagens anteriores. O perfil de melhor esforço, por sua vez,
+mantém apenas a última mensagem, não retransmite perdas e usa
+durabilidade volátil. Os autores avaliaram ainda variações na
+profundidade do histórico, com 1, 10 e 100 mensagens.
+
+Na mesma máquina, a sobrecarga do ROS 2 em relação ao ROS 1 mostrou-se
+não desprezível, e os autores a atribuem às duas conversões de dados
+entre o ROS e o DDS e ao processamento do próprio DDS. A latência
+permaneceu praticamente constante enquanto a mensagem cabia em um único
+datagrama UDP, de até \SI{64}{\kilo\byte}, e cresceu abruptamente a
+partir do momento em que passou a ser fragmentada. A política confiável
+acrescentou latência em troca da retransmissão e da tolerância a
+assinantes tardios, ao passo que a profundidade do histórico não teve
+efeito sobre a latência. A implementação de DDS, por outro lado,
+mostrou-se determinante, já que o OpenSplice obteve as menores latências
+locais entre as avaliadas. Além disso, o ROS 2 distribuiu as mensagens
+entre múltiplos assinantes de forma mais equilibrada que o ROS 1. Os
+autores concluem, portanto, que o desempenho do ROS 2 depende fortemente
+do par \texttt{rmw}/DDS e da configuração de QoS, que precisam ser
+ajustados ao cenário de aplicação.
 
 \citeonline{kronauer2021latency} estenderam a análise para sistemas com
 múltiplos nós e quantificaram a sobrecarga adicionada pela pilha do ROS 2
-em relação ao DDS bruto. Encontraram que, para mensagens pequenas
-(da ordem de \SI{128}{\byte}), o ROS 2 chega a duplicar a latência
-percebida em comparação com chamadas diretas ao DDS, principalmente em
-razão das filas internas e da indireção das interfaces \texttt{rmw}.
-Para mensagens grandes, a fração relativa do \textit{overhead} encolhe e
-o gargalo migra para o próprio DDS.
+em relação ao DDS bruto. Encontraram que, para mensagens pequenas, da
+ordem de \SI{128}{\byte}, o ROS 2 acrescenta até 50\% à latência das
+chamadas diretas ao DDS, e que, além do próprio DDS, a maior parcela
+dessa latência vem do atraso de notificação do \texttt{rclcpp}, isto é,
+do intervalo entre a chegada da mensagem ao DDS e a sua entrega ao
+\textit{callback} pelo executor. Para mensagens grandes, a fração
+relativa da sobrecarga encolhe e o gargalo passa a ser o próprio DDS.
 
 A relevância desses resultados para o presente trabalho é direta. Um
 tradutor que se interponha entre a mensagem ROS original e o consumidor
-SmartData não pode replicar dentro do seu processo o mesmo
-\textit{overhead} que a pilha já paga. As decisões de projeto descritas
-no Capítulo~\ref{cap:design}, subscrição tipada na própria pilha
+SmartData não pode replicar dentro do seu processo a mesma
+sobrecarga que a pilha já paga. As decisões de projeto descritas
+no Capítulo~\ref{cap:design}, assinatura do tipo concreto de cada mensagem na própria pilha
 \texttt{rclcpp}, ausência de introspecção em tempo de execução e
 barramento UDP binário sem intermediação por DDS, são respostas
 diretas a essa preocupação.
@@ -658,7 +827,7 @@ diretas a essa preocupação.
 \citeonline{serrano2015stack} discutem a fragmentação do ecossistema de
 Internet das Coisas em silos verticais que não interoperam e propõem uma
 pilha de orquestração baseada em \textit{middleware} semântico, o
-OpenIoT-VDK. A estratégia dos autores é: introduz camadas de
+OpenIoT-VDK. A estratégia dos autores é introduzir camadas de
 anotação, filtragem e agregação em um \textit{broker} central que media
 o acesso a sensores virtuais e físicos. A abordagem é eficaz em cenários
 de coleta de dados em escala urbana, mas é incompatível com a latência
@@ -670,7 +839,10 @@ entre subsistemas heterogêneos, mas adota uma abordagem
 arquitetonicamente oposta: a tradução ocorre dentro do mesmo processo
 que assina o tópico ROS, sem \textit{brokers} externos, e o consumidor
 SmartData recebe o envelope diretamente do barramento, sem intermediação
-adicional. A solução é mais restrita em escopo (não trata de agregação
+adicional. Essa escolha é motivada pela latência, pois cada processo ou
+\textit{broker} intermediário acrescentaria ao menos uma passagem
+adicional pela rede ou pela comunicação entre processos no caminho entre
+o sensor e o laço de controle. A solução é mais restrita em escopo (não trata de agregação
 nem de consulta histórica), mas adequada ao domínio robótico.
 
 \section{Implementações de SmartData}
@@ -695,15 +867,19 @@ demandados antes que expirem. Essas implementações compartilham a
 estratégia de produzir SmartData diretamente em transdutores embarcados,
 abaixo de qualquer pilha de aplicação.
 
-A implementação SDAV \cite{lisha2026sdav}, desenvolvida
+A implementação SDAV (\textit{SmartData Autonomous Vehicle})
+\cite{lisha2026sdav}, desenvolvida
 no contexto do projeto de veículos autônomos do LISHA, reproduz em
 C++ as mensagens de interesse, resposta e comando do TSTP e as difunde em
 UDP multicast, levando o SmartData a computadores de propósito geral. O
 presente trabalho a adota como referência para o formato das mensagens, porém
-adaptando alguns elementos conforme necessario: o suporte de tempo de execução do
+adaptando alguns elementos conforme necessário: o sistema de suporte à execução do
 \textit{Gateway} foi escrito para as necessidades de um nó ROS, como o
 relógio do próprio ROS, inclusive sob tempo simulado, e a operação sobre
-um transporte sem garantia de entrega.
+um transporte sem garantia de entrega. Como a validade é avaliada
+comparando estampas de tempo atribuídas por nós distintos, esse relógio
+precisa estar sincronizado com o dos demais participantes da rede
+SmartData, questão discutida na Seção~\ref{sec:visao}.
 
 A contribuição original deste trabalho complementa essas implementações
 ao oferecer a ponte que faltava: a entrada do ecossistema robótico.
@@ -723,15 +899,15 @@ Este capítulo descreve a arquitetura do \textit{Gateway} semântico e as
 decisões de projeto que conduziram à sua forma final. A apresentação parte
 de uma visão geral do fluxo de dados, apresenta o modelo que trata os
 tópicos ROS como transdutores SmartData, detalha a linguagem declarativa
-que descreve cada tópico, discute a estratégia de geração de código, a
-dinâmica SmartData adotada, a numeração de dispositivos e o formato das
+que descreve cada tópico, discute a estratégia de geração de código, o
+modelo de execução SmartData adotado, a numeração de dispositivos e o formato das
 mensagens na rede, e termina com o lado consumidor da solução.
 
 \section{Visão Geral}
 \label{sec:visao}
 
-O Gateway é composto por dois executáveis ROS 2 e por um suporte de tempo
-de execução SmartData próprio, independente do \textit{middleware} do ROS
+O Gateway é composto por dois executáveis ROS 2 e por um sistema de suporte
+à execução SmartData próprio, independente do \textit{middleware} do ROS
 e baseado em \textit{sockets} UDP multicast. O primeiro executável,
 \texttt{gateway\_node}, exporta o robô para a rede SmartData: assina os
 tópicos de sensores declarados no descritor, entrega cada mensagem
@@ -740,8 +916,8 @@ um SmartData por instância de transdutor. Esses objetos são anunciados na
 rede e respondem aos interesses que recebem, os atuadores, por sua vez,
 recebem comandos da rede e publicam o \textit{setpoint} resultante no
 tópico ROS correspondente. O segundo executável, \texttt{proxy\_node}, é o
-lado consumidor: instancia SmartData remotos, os \textit{proxies} do
-segundo construtor, que anunciam interesses, recebem as respostas e
+lado consumidor: instancia SmartData remotos, isto é, \textit{proxies} locais de
+transdutores remotos (Seção~\ref{sec:sd-transdutores}), que anunciam interesses, recebem as respostas e
 republicam as mensagens ROS reconstruídas, convertem mensagens ROS em
 comandos e recebem também SmartData de outros produtores da rede.
 
@@ -767,7 +943,7 @@ comandos e recebem também SmartData de outros produtores da rede.
 ]
 
 \node[src] (topic) {tópico ROS\\ \texttt{/scan}, \texttt{/imu}, \dots};
-\node[proc, right=of topic] (sub) {\texttt{Subscription}\\ tipada};
+\node[proc, right=of topic] (sub) {\texttt{Subscription<T>}};
 \node[proc, right=of sub] (src) {\texttt{Source}\\ do tópico};
 \node[proc, right=of src] (td) {transdutores\\ gerados};
 \node[proc, right=of td] (rsd) {SmartData\\ anunciados};
@@ -794,8 +970,8 @@ comandos e recebem também SmartData de outros produtores da rede.
 \legend{Fonte: elaborada pelo autor.}
 \end{figure}
 A Figura~\ref{fig:fluxo-gateway} resume o caminho percorrido por uma
-mensagem. Uma mensagem ROS chega à \texttt{Subscription} tipada criada
-pelo gateway; o \textit{callback} correspondente consulta a árvore
+mensagem. Uma mensagem ROS chega à \texttt{Subscription} criada
+pelo gateway para o tipo de mensagem do tópico; o \textit{callback} correspondente consulta a árvore
 \texttt{tf2} para resolver a origem espacial associada ao
 \texttt{frame\_id} da mensagem e a entrega aos transdutores daquele
 tópico. Cada transdutor extrai o seu campo, converte-o para o SI e
@@ -806,14 +982,32 @@ são reagrupadas na mensagem ROS original. Opcionalmente, toda atualização
 local é também espelhada em um tópico ROS \(\texttt{/smartdata/<tópico>}\)
 do tipo \texttt{semantic\_gateway/msg/SmartData}.
 
-O suporte de tempo de execução segue a implementação SDAV do LISHA como
+O sistema de suporte à execução segue a implementação SDAV, utilizada no projeto de
+veículos autônomos do LISHA, como
 referência de formato, mas foi adaptado para as necessidades do gateway.
-Três diferenças orientaram essa escolha: o relógio é
-injetado, para que o gateway opere sob o tempo simulado do Gazebo; a rede
-é um objeto, e não um estado global, para que os testes executem
-segmentos isolados lado a lado; e os interesses são tratados como estado
-leve renovado periodicamente, pois o transporte UDP não oferece a
-confiabilidade do TSTP (Seção~\ref{sec:dinamica}).
+Duas diferenças orientaram essa escolha: o relógio é injetado, para que
+o gateway opere sob qualquer fonte de tempo adotada pelo ROS, como o
+tempo simulado do Gazebo, e os interesses são tratados como estado
+temporário (\textit{soft state}), isto é, cada interesse deixa de valer
+se não for renovado periodicamente pelo consumidor, pois o transporte UDP
+não oferece a confiabilidade do TSTP e um interesse ou um cancelamento
+perdido não pode deixar o produtor em um estado incorreto
+(Seção~\ref{sec:dinamica}).
+
+O relógio injetado, contudo, precisa estar sincronizado com o dos demais
+participantes da rede SmartData, pois é com ele que o \textit{Gateway}
+estampa os dados que produz e avalia a validade dos que recebe. Sem uma
+base de tempo comum, a comparação entre o instante de produção de um dado
+e o relógio de quem o consome deixa de ter significado, e com ela o
+próprio conceito de validade. Nos experimentos deste trabalho, todos os
+nós executam no mesmo computador, de modo que essa condição é satisfeita
+por construção. No cenário sintético, todos leem o relógio do sistema,
+e, no cenário Gazebo, todos seguem o mesmo tempo simulado publicado no
+tópico \texttt{/clock}. Em uma implantação com nós SmartData embarcados,
+por outro lado, o relógio do ROS teria de ser sincronizado com o da rede,
+por exemplo pelo mecanismo de sincronização do TSTP ou pelo
+\textit{Precision Time Protocol} (PTP), de modo que ambos os lados
+compartilhem a mesma base de tempo.
 
 \section{Tópicos ROS como Transdutores}
 \label{sec:modelo}
@@ -825,7 +1019,8 @@ grandezas, a aceleração linear, em \si{\meter\per\square\second}, e a
 velocidade angular, em \si{\radian\per\second}, cada uma com três
 componentes. O gateway define, para ela, duas classes de transdutor, cada
 uma declarando a sua \texttt{UNIT}, e três instâncias de cada classe,
-distinguidas pelo parâmetro \texttt{dev} do primeiro construtor, que é
+distinguidas pelo parâmetro \texttt{dev} do construtor de transdutores
+locais (Seção~\ref{sec:sd-transdutores}), que é
 exatamente o papel que o conceito original atribui a esse parâmetro.
 Analogamente, um \texttt{LaserScan} define uma única classe de comprimento,
 com uma instância por feixe.
@@ -845,9 +1040,14 @@ exato ainda não está disponível, usa-se a última conhecida. A confiança da
 localização, de 100\% para a transformação exata, 50\% para a última
 conhecida e 0\% quando nenhuma existe, é transmitida no campo
 correspondente da mensagem, de modo que o consumidor sabe quanto confiar
-na posição sem que a amostra seja descartada.
+na posição sem que a amostra seja descartada. Esses três níveis foram
+definidos de forma arbitrária neste trabalho. Uma política mais
+fundamentada poderia derivar a confiança da idade da última
+transformação conhecida e da velocidade do quadro em relação à
+referência, reduzindo-a à medida que cresce o deslocamento possível
+desde então.
 
-Cada instância é exportada por um SmartData do primeiro construtor,
+Cada instância é exportada por um SmartData de transdutor local,
 sensores no modo anunciado e atuadores no modo comandado. Um atuador como
 o \texttt{/cmd\_vel}, do tipo \texttt{Twist}, segue a mesma decomposição,
 com duas classes, velocidade linear e angular, e seis instâncias, uma por
@@ -872,7 +1072,7 @@ o caminho de reconstrução.
 
 \item[Vetor] Uma mensagem ROS carrega \(N\) valores da mesma grandeza, que
 definem uma classe de transdutor com uma instância por elemento de um
-campo vetorial. O caso prototípico é o \texttt{LaserScan}, cuja distância
+campo do tipo arranjo (\textit{array}) da mensagem. O caso prototípico é o \texttt{LaserScan}, cuja distância
 de cada feixe é exportada por um SmartData independente. Filtros opcionais
 (\texttt{finite}, \texttt{finite\_within}) descartam feixes inválidos ou
 fora da faixa declarada do sensor; um feixe descartado não produz amostra,
@@ -886,10 +1086,16 @@ aceleração linear formam um grupo na unidade
 angular formam outro grupo em \si{\radian\per\second}.
 \end{description}
 
+Os três padrões valem também no caminho inverso, em que o
+\textit{proxy} reconstrói a mensagem ROS a partir dos SmartData
+recebidos. Os atuadores, por sua vez, aceitam os padrões escalar e
+composto. Um \texttt{Twist}, por exemplo, é declarado como composto, com
+um grupo de velocidade linear e outro de velocidade angular, e a escrita
+de cada componente compõe a mensagem publicada no tópico do atuador.
+
 Cada tópico declara também um prazo de validade (\texttt{expiry\_ms}) e,
 opcionalmente, um período de amostragem (\texttt{period\_ms}) e o modo de
-operação, anunciado por padrão ou privado. Uma validade menor que o
-período é recusada já na geração de código. A estampa de tempo de cada
+operação, anunciado por padrão ou privado. A estampa de tempo de cada
 amostra é derivada do campo de cabeçalho ROS indicado por
 \texttt{stamp\_field}, e a origem espacial vem da consulta \texttt{tf2} ao
 quadro indicado por \texttt{frame\_field}. A seção \texttt{actuators}
@@ -926,15 +1132,16 @@ sensors:
     expiry_ms: 10
 \end{lstlisting}
 
-\section{Geração de Código em Tempo de Compilação}
+\section{Geração de Código Prévia à Compilação}
 \label{sec:codegen}
 
 A tradução entre as mensagens ROS 2 e os transdutores é produzida por um
-gerador de código executado em tempo de compilação. O gerador, escrito em
+gerador de código executado durante o \textit{build}, antes da
+compilação. O gerador, escrito em
 Python, lê o descritor YAML em duas etapas. Na primeira, constrói um
 modelo intermediário com os tópicos, as classes de transdutor e as
 importações declaradas, e valida a configuração: unidades desconhecidas,
-tópicos declarados duas vezes, validades menores que o período,
+tópicos declarados duas vezes,
 transformações não inversíveis e dispositivos importados que colidem com
 os blocos locais interrompem a geração com uma mensagem que identifica a
 entrada do descritor responsável. Na segunda etapa, cada elemento do
@@ -958,7 +1165,7 @@ responsável por uma fatia bem delimitada do sistema:
 \begin{description}
 \item[\texttt{parsed\_transducers.hpp}] Contém uma classe de transdutor
 por grandeza de cada tópico, derivada do modelo \texttt{Transducer<UNIT>}
-do suporte de tempo de execução. Cada classe declara a sua unidade, o seu
+do sistema de suporte à execução. Cada classe declara a sua unidade, o seu
 tipo (sensor, atuador ou ambos), o fato de ser ativa e o início do seu
 bloco de dispositivos. Nos sensores, o método \texttt{update} usa o
 deslocamento do dispositivo para escolher o seu campo, com acesso direto
@@ -968,7 +1175,7 @@ atuadores, o método \texttt{actuate} faz o caminho inverso.
 
 \item[\texttt{parsed\_gateway.hpp}] Contém a classe \texttt{Gateway},
 usada pelo \texttt{gateway\_node}, que cria as
-\texttt{rclcpp::Subscription<T>} tipadas, os pontos de distribuição de
+\texttt{rclcpp::Subscription<T>}, os pontos de distribuição de
 cada tópico aos seus transdutores, os publicadores dos atuadores e um
 SmartData por instância de transdutor. As instâncias dos transdutores
 vetoriais são criadas quando a primeira mensagem revela o número de
@@ -977,7 +1184,7 @@ elementos do sensor.
 \item[\texttt{parsed\_proxies.hpp}] Contém a classe \texttt{Proxies},
 usada pelo \texttt{proxy\_node}, que reúne os SmartData remotos de cada
 classe de transdutor, os estados de reconstrução das mensagens, cada um
-estritamente tipado pela mensagem alvo e com a inversa do
+definido para o tipo da mensagem alvo e com a inversa do
 \texttt{value\_transform} embutida, as assinaturas que convertem
 mensagens em comandos e os SmartData importados de outros produtores.
 \end{description}
@@ -991,11 +1198,11 @@ resolvida estaticamente, os executáveis não leem o descritor durante a
 execução, e a única forma da configuração presente no compilado é o
 código gerado.
 
-\section{Dinâmica SmartData}
+\section{Modelo de Execução SmartData}
 \label{sec:dinamica}
 
-O suporte de tempo de execução do gateway implementa a dinâmica descrita
-na Seção~\ref{sec:sd-dinamica}. Um SmartData anunciado permanece em
+O sistema de suporte à execução do gateway implementa o modelo de execução
+descrito na Seção~\ref{sec:sd-dinamica}. Um SmartData anunciado permanece em
 silêncio até receber um interesse compatível, com a mesma unidade, dispositivo
 igual ao seu ou curinga, região que contenha a origem da sua última
 amostra e intervalo de tempo ainda aberto. Cada interesse aceito é
@@ -1013,10 +1220,16 @@ No TSTP, a entrega dos interesses é garantida pelo próprio protocolo.
 Sobre UDP, que não oferece essa garantia, um interesse perdido ou um
 consumidor iniciado antes do produtor quebrariam a associação de forma
 permanente. Adotou-se, por isso, um tratamento dos interesses como estado
-leve: o consumidor reanuncia cada interesse a cada segundo, e o produtor
+temporário (\textit{soft state}): o consumidor reanuncia cada interesse a cada segundo, e o produtor
 desfaz as associações não renovadas em \SI{3.5}{\second}, o que também
 encerra o envio para consumidores que deixaram a rede sem revogar os seus
-interesses. A revogação explícita continua sendo enviada quando um
+interesses. O prazo de \SI{3.5}{\second} equivale a três períodos e meio
+de renovação. Assim, uma associação sobrevive à perda de até três
+reanúncios consecutivos, e o meio período adicional absorve variações no
+instante de envio. Ambos os valores são parâmetros da \texttt{Network} e
+representam um compromisso entre a tolerância a perdas e a rapidez com
+que o produtor deixa de atender um consumidor que saiu da rede. A
+revogação explícita continua sendo enviada quando um
 \textit{proxy} é destruído.
 
 Os comandos seguem o caminho inverso. Escrever um valor em um SmartData
@@ -1109,8 +1322,8 @@ está fora do escopo, e o último salto repete a origem, pois a difusão
 ocorre em um único segmento de rede.
 
 \subsection{Transporte UDP Multicast}
-As mensagens são difundidas, uma por datagrama, no grupo
-\texttt{224.1.1.1:5000}, o mesmo da implementação de referência, com
+As mensagens são difundidas, uma por datagrama, em um grupo UDP
+multicast configurável, com
 \textit{time-to-live} igual a um e \textit{loopback} habilitado, de modo que
 produtores e consumidores podem compartilhar a mesma máquina ou o mesmo
 processo. A escolha de multicast permite que consumidores entrem e saiam da
@@ -1139,10 +1352,15 @@ e no período configurados por parâmetro, de modo que um único interesse
 cobre, por exemplo, todos os feixes de um LiDAR. As respostas recebidas
 são reagrupadas pela origem temporal, que o gateway preenche com o mesmo
 \texttt{header.stamp} para todos os campos de uma mensagem. Sensores
-escalares produzem a mensagem a cada resposta, sensores compostos, quando
-todos os campos da amostra chegaram ou quando chega uma amostra mais
-nova e sensores vetoriais, quando começa uma nova varredura ou, na
-ausência dela, quando a varredura corrente para de receber feixes. Para
+escalares produzem a mensagem a cada resposta. Sensores compostos a
+produzem quando todos os campos da amostra chegaram, e sensores
+vetoriais, quando começa uma nova varredura. Como uma resposta perdida
+impediria que uma amostra composta se completasse e a última varredura
+só seria publicada com a chegada da seguinte, o \textit{proxy} verifica
+também, periodicamente, as amostras em aberto. A cada período de
+liberação, configurado por \texttt{drain\_period\_ms}, uma amostra que
+não recebeu nenhuma resposta desde a verificação anterior é publicada
+com os campos que chegaram. Para
 os atuadores, o \textit{proxy} mantém um SmartData remoto por instância,
 com o dispositivo específico do componente, e a escrita de cada campo de
 uma mensagem publicada em \(\texttt{<tópico>\_command}\) produz o comando
@@ -1162,9 +1380,9 @@ import não tem transdutor local nem bloco de dispositivos, o
 \textit{proxy} apenas anuncia o interesse e converte as respostas.
 
 Dois aspectos exigem cuidado porque o produtor é desconhecido. O
-primeiro é o tempo, a estampa da mensagem pode vir da origem da amostra
-ou do relógio do \textit{proxy} no recebimento, a segunda opção sendo
-útil quando o produtor não compartilha a base de tempo do ROS. O segundo
+primeiro é o tempo: a estampa da mensagem vem da origem da amostra, o
+que pressupõe que o produtor compartilhe a base de tempo do
+\textit{Gateway}, condição discutida na Seção~\ref{sec:visao}. O segundo
 é a identidade do produtor, com o dispositivo curinga, cada resposta
 gera uma mensagem, o \texttt{frame\_id} pode identificar o dispositivo
 de origem, e as respostas dos transdutores do próprio pacote com a mesma
@@ -1224,7 +1442,7 @@ Os \textit{headers} sob \texttt{build/generated/}, produzidos pelo
 gerador a cada compilação, complementam os \textit{headers} estáticos
 sob \texttt{include/} no caminho de inclusão dos executáveis. O diretório
 \texttt{include/smartdata/}, junto com \texttt{src/smartdata/network.cpp},
-forma o suporte de tempo de execução SmartData, compilado como uma
+forma o sistema de suporte à execução SmartData, compilado como uma
 biblioteca compartilhada usada pelos dois nós e pelos testes.
 
 \section{Codificação da Unidade SI}
@@ -1267,10 +1485,17 @@ datagrama, interpreta apenas o seu cabeçalho e o entrega aos objetos
 SmartData registrados para a unidade correspondente, a interpretação do
 tipo da mensagem, do dispositivo e da região fica a cargo de cada objeto.
 A classe \texttt{Scheduler} executa, em uma única \textit{thread}, as
-tarefas periódicas do suporte de tempo de execução, as respostas a
+tarefas periódicas do sistema de suporte à execução, as respostas a
 interesses periódicos e a renovação dos interesses, e descarta ativações
 perdidas em vez de executá-las em rajada, pois, para um sensor, interessa
-o valor atual, e não os anteriores. O relógio usado para as estampas de
+o valor atual, e não os anteriores. Essa \textit{thread} não participa
+do caminho dos interesses orientados a eventos, cujas respostas são
+enviadas na própria \textit{thread} que recebe a mensagem ROS. O seu
+trabalho por ativação se resume a montar e enviar um datagrama por
+associação periódica, e ela só se tornaria um gargalo se a taxa agregada
+dessas respostas se aproximasse da vazão de envio medida na
+Seção~\ref{sec:resultados}, da ordem de dezenas de milhares de
+datagramas por segundo. O relógio usado para as estampas de
 tempo é uma função passada ao construtor da \texttt{Network}.
 
 \section{Objetos SmartData}
@@ -1346,7 +1571,7 @@ responsabilidades do gerador são:
 \begin{enumerate}
     \item Validar o descritor e construir um modelo intermediário de
     tópicos, classes de transdutor e imports; qualquer erro, como unidade
-    desconhecida, tópico repetido, validade menor que o período ou
+    desconhecida, tópico repetido ou
     dispositivo importado dentro de um bloco local, interrompe a
     compilação com uma mensagem que aponta a entrada do YAML.
     \item Alocar o bloco de dispositivos de cada classe de transdutor,
@@ -1429,7 +1654,9 @@ na rede e aplicado pelo gateway em \texttt{/cmd\_vel}. Esse cenário não
 substitui o sintético para fins de medição numérica precisa, pois o
 \textit{jitter} introduzido pelo simulador é dominante sobre a latência do
 tradutor, mas demonstra a capacidade da solução de operar com um robô
-representativo em movimento.
+representativo em movimento. Por essa razão, nenhuma métrica temporal
+deste capítulo é extraída do cenário Gazebo, que é usado exclusivamente
+na verificação funcional.
 
 \section{Métricas e Procedimentos}
 \label{sec:metricas}
@@ -1461,7 +1688,12 @@ A vazão é medida em um \textit{loop} fechado: a mesma mensagem de 100
 feixes é entregue repetidamente ao \texttt{Source} por uma janela de
 \SI{500}{\milli\second}, e o número de iterações completas é contado, nas
 duas configurações acima. A métrica derivada é o número de varreduras por
-segundo que o tradutor suporta. O critério de sucesso deriva do agregado
+segundo que o tradutor suporta. Como o \textit{loop} é fechado e
+executa em uma única \textit{thread}, sem espera entre as entregas, essa
+vazão corresponde aproximadamente ao inverso da latência média de
+tradução. A medição separada verifica que esse custo se mantém sob carga
+contínua e, na configuração com envio, expõe o limite imposto pela rede,
+que a latência isolada não revela. O critério de sucesso deriva do agregado
 de entrada declarado no descritor: somando LiDAR (360 feixes \(\times\)
 \SI{10}{\hertz}), IMU (6 campos \(\times\) \SI{100}{\hertz}) e
 temperatura (\SI{2}{\hertz}), obtém-se aproximadamente
@@ -1473,11 +1705,11 @@ vazão com envio supere o próprio agregado. Os valores efetivos são
 reportados para caracterização.
 
 \subsection{Verificação Funcional}
-A correção da solução é verificada por cinco suítes de testes
+A corretude da solução é verificada por cinco suítes de testes
 automatizados, com 43 casos ao todo, executadas a cada compilação. A
 suíte \texttt{test\_si\_units} cobre a codificação da unidade. A suíte
 \texttt{test\_smartdata\_runtime} cobre o \textit{layout} das mensagens e
-a dinâmica SmartData: o silêncio de um SmartData anunciado sem interesse
+o modelo de execução SmartData: o silêncio de um SmartData anunciado sem interesse
 e de um SmartData privado, os interesses orientados a eventos e
 periódicos, a menor validade na resposta, a região, o dispositivo
 específico, a revogação e o vencimento das associações, a recusa de
@@ -1523,7 +1755,7 @@ virtualizada do WSL2.
 \subsection{Vazão}
 O \textit{loop} fechado mediu entre \(1{,}41 \times 10^5\) e
 \(1{,}45 \times 10^5\) varreduras por segundo de \texttt{LaserScan} de
-100 feixes em um único \textit{thread}, equivalente a cerca de
+100 feixes em uma única \textit{thread}, equivalente a cerca de
 \(1{,}4 \times 10^7\) atualizações de SmartData por segundo, mais de
 trinta vezes o critério de \(\SI{4.2e5}{\per\second}\). Com o envio das
 respostas, a vazão caiu para 650 a 770 varreduras por segundo, ou
@@ -1617,11 +1849,19 @@ interesse pelos dados, pois um SmartData sem interesse não envia nada.
 O agrupamento de respostas em um mesmo datagrama reduziria o número de
 chamadas de sistema, ao custo de se afastar do formato de referência.
 
-Segundo, o ambiente de medição é um \textit{host} de consumo, e a pilha
-de rede do WSL2 é virtualizada. Resultados em \textit{hardware}
-embarcado, típico em robôs de campo, não foram avaliados; espera-se uma
-latência de tradução mais alta, mas a margem de uma ordem de grandeza em
-relação ao critério de aceitação sugere que ele seguirá sendo cumprido.
+Segundo, o ambiente de medição é um \textit{host} de consumo, com o
+contêiner executado sobre o WSL2. A tradução ocorre inteiramente em
+espaço de usuário, sem chamadas de sistema, e por isso é pouco afetada
+pela virtualização. O envio, ao contrário, atravessa a pilha de rede
+virtualizada do WSL2 a cada resposta, de modo que os valores medidos com
+envio devem ser lidos como pessimistas em relação a uma execução nativa
+em Linux. Resultados em \textit{hardware} embarcado, típico em robôs de
+campo, não foram avaliados. Nesses processadores, a menor frequência, a
+menor capacidade de cache e a gestão de energia devem elevar a latência
+de tradução, que depende quase exclusivamente do desempenho de um único
+núcleo, porém, o critério de aceitação seguiria cumprido para um processador
+até cerca de doze vezes mais lento que o utilizado, hipótese a ser
+verificada experimentalmente.
 
 Terceiro, o cenário Gazebo confirma a operação funcional, mas suas
 medidas temporais refletem o simulador, não o tradutor, e foram
@@ -1643,13 +1883,14 @@ perda de pacotes e à ordem de inicialização dos nós.
 Este trabalho apresentou o projeto, a implementação e a avaliação de
 um \textit{Gateway} semântico que exporta sensores e atuadores ROS 2 como
 transdutores SmartData. A solução foi conduzida em três frentes. No plano
-conceitual, formalizou-se em uma linguagem declarativa o mapeamento entre
+conceitual, especificou-se, por meio de um descritor declarativo em YAML,
+o mapeamento entre
 os campos das mensagens robóticas e as classes de transdutor do
 SmartData, identificando três padrões de decomposição suficientes para
 cobrir os tipos relevantes da biblioteca \texttt{sensor\_msgs}. No plano
-arquitetural, adotou-se a geração de código em tempo de compilação como
-caminho único de tradução e um suporte de tempo de execução próprio que
-reproduz a dinâmica de transdutores do conceito original, com modos de
+arquitetural, adotou-se a geração de código prévia à compilação como
+caminho único de tradução e um sistema de suporte à execução próprio que
+reproduz o modelo de execução de transdutores do conceito original, com modos de
 operação, interesses orientados a eventos e periódicos, regiões
 espaço-temporais, validade e comandos, em mensagens com o formato do
 TSTP. No plano da validação, demonstrou-se empiricamente que a latência
@@ -1670,16 +1911,17 @@ ou intermediação por \textit{brokers} de aplicação.
 \label{sec:futuro}
 
 A continuidade natural deste trabalho organiza-se em cinco direções.
-Primeiro, a verificação experimental contra uma implementação
-independente de transdutor SmartData, por exemplo, a SDAV ou um nó EPOS
-sobre TSTP, fecharia o ciclo de interoperabilidade prometido pelo formato
+Primeiro, a verificação experimental contra uma implementação de
+SmartData desenvolvida de forma independente, como a SDAV ou um nó EPOS
+sobre TSTP, comunicando-se com o \textit{Gateway} pela mesma rede,
+fecharia o ciclo de interoperabilidade prometido pelo formato
 compartilhado. Segundo, a extensão do mecanismo de autenticação das
-mensagens, hoje preenchido com zeros, completaria a propriedade de
-confiabilidade originalmente prevista por
+mensagens, hoje preenchido com zeros, completaria as garantias de
+autenticidade e integridade dos dados originalmente previstas por
 \citeonline{frohlich2018smartdata}. Terceiro, a implementação da
 supressão de respostas na ausência de função de fusão e do atendimento de
-cada interesse periódico no seu próprio período aproximaria o suporte de
-tempo de execução do conceito original. Quarto, a avaliação do
+cada interesse periódico no seu próprio período aproximaria o sistema de
+suporte à execução do conceito original. Quarto, a avaliação do
 agrupamento de respostas por datagrama permitiria reduzir o custo de
 envio dominante. Quinto, a caracterização de desempenho em
 \textit{hardware} embarcado representativo do que se encontra em robôs de
