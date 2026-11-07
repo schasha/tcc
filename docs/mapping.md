@@ -44,7 +44,6 @@ carrega a origem da sua amostra, em vez de usar a posição do nó.
 | period > 0 → **time-triggered**: resposta a cada período; transducers passivos são amostrados | `tick()` no `Scheduler` |
 | períodos diferentes → amostragem no **MDC** dos períodos            | `reschedule_locked()`                   |
 | a resposta leva o **menor expiry** entre o próprio e os dos interesses | `response_expiry_locked()`           |
-| **expiry < period é inválido**                                      | `check_timing()` / interesse ignorado   |
 | ler um SmartData **expirado** dispara uma atualização (passivos)    | `Responsive_SmartData::value()`         |
 | `wait()` bloqueia até a próxima atualização                         | `wait()` nas duas classes               |
 | escrever num SmartData = novo **setpoint**; remoto → **Command** aos COMMANDED da região | `operator=(double)` |
@@ -205,7 +204,6 @@ imports:
     region: { x: 3.0, y: 1.0, z: 0.0, radius: 5.0 }       # opcional (padrão: região do nó)
     period_ms: 1000                    # opcional (padrão: parâmetro period_ms do nó)
     expiry_ms: 0                       # padrão 0
-    stamp: origin                      # origin (padrão) | receive
     exclude_local: true                # padrão
 
   # vários dispositivos de um nó estrangeiro reconstruídos numa mensagem
@@ -229,7 +227,6 @@ imports:
 | `device`        | `any` = um interesse com `ANY_DEVICE`, todos os produtores daquela unidade; um id = só ele |
 | `frame_id`      | escrito no `header.frame_id`; com `{device}`, distingue produtores de um import `any` |
 | `region`        | esfera (metros, no frame do produtor) só para este import                   |
-| `stamp`         | `origin` = tempo de origem da amostra; `receive` = relógio do proxy na chegada (produtor com outra base de tempo) |
 | `stamp_field`   | `header.stamp` (padrão) ou `null` para mensagens sem header (`std_msgs/Float64`, `Vector3`) |
 | `exclude_local` | um import `any` ignora os dispositivos dos transducers deste pacote com a mesma unidade |
 
@@ -314,10 +311,10 @@ os campos declarados no YAML.
 | Suite                    | O que cobre                                                              |
 |--------------------------|--------------------------------------------------------------------------|
 | `test_si_units`          | codificação 32-bit da Fig. 1                                             |
-| `test_smartdata_runtime` | layout das mensagens; dinâmica: silêncio sem interesse, event-driven, time-triggered, região, device, revogação/lease, menor expiry, expiry < period, leitura expirada, `wait()`, Commands só a COMMANDED, fuser |
+| `test_smartdata_runtime` | layout das mensagens; dinâmica: silêncio sem interesse, event-driven, time-triggered, região, device, revogação/lease, menor expiry, expiry < period aceito, leitura expirada, `wait()`, Commands só a COMMANDED, fuser |
 | `test_gateway_pipeline`  | transducers gerados (unidades, blocos de dev, filtros, conversões, atuador) e latência/vazão da tradução |
 | `test_bus_roundtrip`     | ponta a ponta ROS → gateway → rede → proxies → ROS, e `<topic>_command` → Commands → `/cmd_vel`, com interesses event-driven e time-triggered; setpoints de mesma unidade não vazam no IMU recuperado |
-| `test_imports`           | `imports:` (gerado de `test/imports_test.yaml`): produtores estrangeiros por `device: any` separados por `frame_id`, transducer local não importado, dispositivo específico em mensagem sem header, composite, região própria e `stamp: receive` |
+| `test_imports`           | `imports:` (gerado de `test/imports_test.yaml`): produtores estrangeiros por `device: any` separados por `frame_id`, transducer local não importado, dispositivo específico em mensagem sem header, composite, região própria e estampa de origem |
 
 ---
 

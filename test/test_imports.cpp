@@ -306,7 +306,7 @@ TEST_F(ImportTest, CompositeImportRebuildsOneMessage)
     EXPECT_NEAR(got[0].z, 9.81, 1e-12);
 }
 
-TEST_F(ImportTest, RegionFiltersProducersAndStampIsArrivalTime)
+TEST_F(ImportTest, RegionFiltersProducersAndStampIsOriginTime)
 {
     auto & inside  = produce<PASCAL_CODE>(1);
     auto & outside = produce<PASCAL_CODE>(2);
@@ -320,9 +320,7 @@ TEST_F(ImportTest, RegionFiltersProducersAndStampIsArrivalTime)
     const auto got = listener_->pressure.all();
     ASSERT_EQ(got.size(), 1u) << "the producer outside the import's region is ignored";
     EXPECT_NEAR(got[0].fluid_pressure, 101325.0, 1e-9);
-    const double now_s = proxy_->now().seconds();
-    EXPECT_NEAR(got[0].header.stamp.sec, now_s, 5.0)
-        << "stamp: receive uses the proxy's clock, not the producer's origin time (3 s)";
+    EXPECT_EQ(got[0].header.stamp.sec, 3) << "stamped with the producer's origin time";
 }
 
 int main(int argc, char ** argv)

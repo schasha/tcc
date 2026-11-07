@@ -16,7 +16,8 @@
 //       SmartData in the region.
 //
 // Expiry is relative to the time the data was produced; 0 means the data
-// never expires. Specifying an expiry smaller than the period is invalid.
+// never expires. It may be shorter than the period: each response then
+// stays usable only for part of the interval until the next one.
 
 #include <algorithm>
 #include <chrono>
@@ -48,8 +49,6 @@ inline void check_timing(Microsecond expiry, Microsecond period)
 {
     if (expiry < 0 || period < 0)
         throw std::invalid_argument("SmartData expiry and period must be non-negative");
-    if (period > 0 && expiry > 0 && expiry < period)
-        throw std::invalid_argument("SmartData expiry smaller than its period is invalid");
 }
 
 // ── Local transducers ───────────────────────────────────────────────────────
@@ -266,7 +265,7 @@ private:
 
     bool accepts_locked(const Region & region, Microsecond expiry, Microsecond period) const
     {
-        if (expiry < 0 || period < 0 || (period > 0 && expiry > 0 && expiry < period)) return false;
+        if (expiry < 0 || period < 0) return false;
         if (region.t1 < net_.now()) return false;
         const Reading r = transducer_->read();
         // before the first sample the location is unknown: bind optimistically

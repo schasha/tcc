@@ -192,8 +192,6 @@ def build_model(cfg: dict[str, Any]) -> tuple[list[dict], list[dict]]:
 
         expiry = ms_to_us(spec.get("expiry_ms", 0), f"{ctx}.expiry_ms")
         period = ms_to_us(spec.get("period_ms", 0), f"{ctx}.period_ms")
-        if period > 0 and 0 < expiry < period:
-            die(f"{ctx}: expiry_ms smaller than period_ms is invalid")
 
         if actuator:
             mode = "sd::COMMANDED"
@@ -304,12 +302,9 @@ def build_imports(specs: list[dict], topics: list[dict], transducers: list[dict]
         period = None
         if "period_ms" in spec:
             period = ms_to_us(spec["period_ms"], f"{ctx}.period_ms")
-            if period > 0 and 0 < expiry < period:
-                die(f"{ctx}: expiry_ms smaller than period_ms is invalid")
 
-        stamp = spec.get("stamp", "origin")
-        if stamp not in ("origin", "receive"):
-            die(f"{ctx}: stamp must be 'origin' or 'receive'")
+        if "stamp" in spec:
+            die(f"{ctx}: 'stamp' was removed; imports always carry the origin time")
         stamp_field = spec.get("stamp_field", "header.stamp")
         frame_id = spec.get("frame_id")
         if frame_id is not None and stamp_field is None:
@@ -330,7 +325,6 @@ def build_imports(specs: list[dict], topics: list[dict], transducers: list[dict]
             "kind":        kind,
             "expiry":      expiry,
             "period":      period,
-            "stamp":       stamp,
             "stamp_field": stamp_field,
             "frame_id":    frame_id,
             "region":      region,
@@ -798,7 +792,6 @@ struct {c['cls']} {{
         region = (f"make_region({r['x']!r}, {r['y']!r}, {r['z']!r}, {r['radius']!r})"
                   if r else "region")
         period = "period" if imp["period"] is None else f"{imp['period']}"
-        stamp = "node_->now()" if imp["stamp"] == "receive" else "sd::to_stamp(t)"
         frame_root = sf.rsplit(".", 1)[0] + ".frame_id" if sf and "." in sf else "frame_id"
 
         for k, (cls, dev, _field) in enumerate(imp["fields"]):
@@ -807,7 +800,7 @@ struct {c['cls']} {{
             out["members"].append(f"    std::unique_ptr<{px}> {member};")
             out["ctor_px"].append(f"""\
         {member} = std::make_unique<{px}>(
-            net, {region}, client_expiry({imp['expiry']}, {period}), {period}, sd::ALL,
+            net, {region}, {imp['expiry']}, {period}, sd::ALL,
             {'sd::ANY_DEVICE' if dev is None else f'{dev}u'}, {px}::Fuser{{}},
             [this](const {px}::Sample & s) {{ on_{n}(s.device, s.value, s.origin.t); }});""")
 
@@ -825,7 +818,7 @@ struct {c['cls']} {{
         }}
         {cpp} m;""")
             if sf:
-                lines.append(f"        m.{sf} = {stamp};")
+                lines.append(f"        m.{sf} = sd::to_stamp(t);")
             if imp["frame_id"] is not None:
                 fid = imp["frame_id"]
                 if "{device}" in fid:
@@ -852,7 +845,7 @@ struct {c['cls']} {{
         else:
             start = []
             if sf:
-                start.append(f"s.msg.{sf} = {stamp};")
+                start.append(f"s.msg.{sf} = sd::to_stamp(t);")
             if imp["frame_id"] is not None:
                 start.append(f"s.msg.{frame_root} = {cstr(imp['frame_id'])};")
             feed, state, drain = emit_composite_feed(
@@ -981,7 +974,7 @@ def emit_proxies(topics: list[dict], transducers: list[dict], imports: list[dict
                 proxies_m.append(f"    std::unique_ptr<{px}> px_{tn}_;")
                 ctor_px.append(f"""\
         px_{tn}_ = std::make_unique<{px}>(
-            net, region, client_expiry({t['expiry']}, period), period, sd::ALL, sd::ANY_DEVICE,
+            net, region, {t['expiry']}, period, sd::ALL, sd::ANY_DEVICE,
             {px}::Fuser{{}},
             [this](const {px}::Sample & s) {{ on_{n}(s.device, s.value, s.origin.t); }});""")
         else:
@@ -1083,13 +1076,6 @@ public:
     std::size_t commands()  const {{ return commands_.load(); }}
 
 private:
-    // The proxy decides how long data stays usable; it may not be shorter
-    // than the period it asks for.
-    static sd::Microsecond client_expiry(sd::Microsecond expiry, sd::Microsecond period)
-    {{
-        return (expiry > 0 && period > expiry) ? period : expiry;
-    }}
-
     static sd::Region make_region(double x, double y, double z, double radius)
     {{
         sd::Region r;

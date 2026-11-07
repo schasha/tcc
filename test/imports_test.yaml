@@ -48,7 +48,7 @@ imports:
           - { field: y, device: 11 }
           - { field: z, device: 12 }
 
-  # raw unit code (pascal), own region, stamped on arrival
+  # raw unit code (pascal), own region
   - topic: /ext/pressure
     type: sensor_msgs/msg/FluidPressure
     decomposition: scalar
@@ -56,4 +56,3 @@ imports:
     device: any
     value_field: fluid_pressure
     region: { x: 5.0, y: 5.0, z: 0.0, radius: 1.0 }
-    stamp: receive

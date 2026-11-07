@@ -6,7 +6,7 @@
 //   * event-driven interests get every update, time-triggered ones one
 //     response per period (passive transducers are sampled for it);
 //   * regions, devices, revocation and interest leases select who answers;
-//   * the response carries the shortest expiry; expiry < period is invalid;
+//   * the response carries the shortest expiry; expiry may be shorter than the period;
 //   * COMMANDED SmartData execute commands, others ignore them;
 //   * a fuser combines the responses of several transducers.
 
@@ -352,13 +352,14 @@ TEST(Runtime, RevokedAndLapsedInterestsUnbind)
 
 // ── timing rules ─────────────────────────────────────────────────────────────
 
-TEST(Runtime, ExpirySmallerThanPeriodIsInvalid)
+TEST(Runtime, ExpiryShorterThanPeriodIsAccepted)
 {
     sd::Network net(test_config());
-    EXPECT_THROW(Thermo_SD(net, 0, 10'000, sd::ADVERTISED, 20'000), std::invalid_argument);
-    EXPECT_THROW(Thermo_Proxy(net, sd::Region::everywhere(), 10'000, 20'000), std::invalid_argument);
+    EXPECT_NO_THROW(Thermo_SD(net, 0, 10'000, sd::ADVERTISED, 20'000));
+    EXPECT_NO_THROW(Thermo_Proxy(net, sd::Region::everywhere(), 10'000, 20'000));
+    EXPECT_THROW(Thermo_SD(net, 0, -1, sd::ADVERTISED), std::invalid_argument);
 
-    // an invalid interest coming from the network is ignored
+    // such an interest coming from the network binds like any other
     Thermo_SD sensor(net, 0, 0, sd::ADVERTISED);
     sd::wire::Interest in{};
     in.header = sd::make_header(sd::INTEREST, sd::SINGLE | sd::ANNOUNCE, 0, {{0, 0, 0}, 0}, 0,
@@ -367,8 +368,7 @@ TEST(Runtime, ExpirySmallerThanPeriodIsInvalid)
     in.expiry = 10'000;
     in.period = 20'000;
     net.send(&in, sizeof(in));
-    std::this_thread::sleep_for(100ms);
-    EXPECT_EQ(sensor.interested(), 0u);
+    EXPECT_TRUE(eventually([&] { return sensor.interested() == 1; }));
 }
 
 TEST(Runtime, PassiveSensorIsSampledWhenExpiredAndWaitBlocksForUpdates)

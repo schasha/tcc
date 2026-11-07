@@ -174,7 +174,7 @@ imports:
     frame_id: "sd_{device}"     # identifica o produtor
 ```
 
-Opções (região própria, período, `stamp: receive`, `composite` com um
+Opções (região própria, período, `composite` com um
 dispositivo por campo, unidade por código cru): `docs/mapping.md` §5.6.
 
 Detalhes completos da DSL: `docs/mapping.md`. Para acrescentar uma
