@@ -27,3 +27,6 @@ log/
 *.lof
 *.lot
 *.synctex.gz
+
+# Benchmark raw samples (CSV, summary.md and plots/ are kept)
+bench/results/*/raw/

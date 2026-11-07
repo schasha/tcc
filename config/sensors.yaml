@@ -14,7 +14,7 @@
 #   expiry_ms  how long a sample stays valid after it was produced; also the
 #              default expiry of the remote proxies. 0 = never expires.
 #   period_ms  local sampling period. 0 (default) = the transducer is active:
-#              every ROS message is an update. Must not exceed expiry_ms.
+#              every ROS message is an update. May exceed expiry_ms.
 #
 # Sensors are exported as ADVERTISED SmartData (mode: private keeps them
 # off the network); actuators are always COMMANDED.

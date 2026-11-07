@@ -5,6 +5,11 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Benchmarks and the latency tests are only meaningful when optimized
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
 # Compiler warnings
 add_compile_options(-Wall -Wextra -Wpedantic)
 
@@ -13,6 +18,7 @@ find_package(ament_cmake        REQUIRED)
 find_package(rclcpp             REQUIRED)
 find_package(sensor_msgs        REQUIRED)
 find_package(geometry_msgs      REQUIRED)
+find_package(nav_msgs           REQUIRED)
 find_package(std_msgs           REQUIRED)
 find_package(tf2                REQUIRED)
 find_package(tf2_ros            REQUIRED)
@@ -105,8 +111,28 @@ target_include_directories(demo_publisher_node PUBLIC
 ament_target_dependencies(demo_publisher_node ${NODE_DEPS})
 target_link_libraries(demo_publisher_node "${cpp_typesupport_target}")
 
+# ── Benchmarks (bench/, driven by bench/run_all.sh) ─────────────────────────
+# bench_gateway: isolated translation / send / open-loop experiments
+add_executable(bench_gateway bench/bench_gateway.cpp)
+add_dependencies(bench_gateway gateway_codegen)
+target_include_directories(bench_gateway PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<BUILD_INTERFACE:${GEN_DIR}>
+)
+ament_target_dependencies(bench_gateway ${NODE_DEPS})
+target_link_libraries(bench_gateway "${cpp_typesupport_target}" smartdata_runtime)
+
+# bench_e2e: end-to-end latency, ROS 2 hop vs. gateway + network + proxy
+add_executable(bench_e2e bench/bench_e2e.cpp)
+ament_target_dependencies(bench_e2e rclcpp sensor_msgs)
+
+# bench_steps: setpoint steps through SmartData commands in Gazebo
+add_executable(bench_steps bench/bench_steps.cpp)
+ament_target_dependencies(bench_steps rclcpp geometry_msgs nav_msgs)
+
 # ── Install ───────────────────────────────────────────────────────────────────
 install(TARGETS gateway_node proxy_node demo_publisher_node
+  bench_gateway bench_e2e bench_steps
   DESTINATION lib/${PROJECT_NAME}
 )
 install(TARGETS smartdata_runtime

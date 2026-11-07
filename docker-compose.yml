@@ -3,8 +3,8 @@ services:
     build:
       context: ./docker
       args:
-        USER_UID: "1000"
-        USER_GID: "1000"
+        USER_UID: "${USER_UID:-1000}"
+        USER_GID: "${USER_GID:-1000}"
     image: tcc-semantic-gateway:humble
     container_name: tcc-ros
     network_mode: host
