@@ -44,6 +44,8 @@
 \usepackage{csquotes}                % \enquote{...}
 \usepackage{tikz}
 \usetikzlibrary{arrows.meta,positioning,shapes.geometric,fit,calc}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18, /pgf/number format/use comma, /pgf/number format/1000 sep={.}}
 
 % ---------- formatação visual ----------
 % Títulos de capítulo/seção em 14pt (padrão UFSC/INE).
@@ -238,17 +240,21 @@ uma classe de transdutor por grandeza física e os objetos SmartData que a
 exportam. As mensagens de interesse, resposta e comando seguem o layout de
 mensagens TSTP e são difundidas em UDP multicast; um nó \textit{proxy}
 reconstrói as mensagens ROS a partir das respostas e recebe também SmartData de
-outros produtores. A validação em ambiente conteinerizado mediu uma latência de
-tradução de \SI{8.3}{\micro\second} no 95º percentil para uma varredura LiDAR
-de 100 feixes, uma ordem de grandeza abaixo do critério de
-\SI{100}{\micro\second}, adotado como um décimo do piso de latência do ROS 2
-para cargas pequenas como reportado em \citeonline{kronauer2021latency}; o envio das 100 respostas pela
-rede eleva o custo para até \SI{2.5}{\milli\second}, dominado pela chamada
-de sistema \texttt{sendto} executada para cada SmartData, que é enviado em um
-datagrama UDP próprio. Em simulação no Gazebo, com um robô TurtleBot3 Burger equipado com LiDAR e
-IMU, as mensagens recuperadas exclusivamente
-pela rede SmartData mantiveram as taxas originais dos sensores, e o robô foi
-conduzido por comandos SmartData. Os resultados sustentam a viabilidade de
+outros produtores. A avaliação, conduzida em Linux nativo por hipóteses
+refutáveis, com repetições e intervalos de confiança, mostrou que a latência
+de tradução cresce linearmente com o número de campos da mensagem, cerca de
+\SI{72}{\nano\second} por campo, e
+fica em \SI{26.8}{\micro\second} no 99º percentil para uma varredura LiDAR de
+360 feixes, abaixo do critério de \SI{100}{\micro\second}, adotado como um
+décimo do piso de latência do ROS 2 para cargas pequenas reportado por
+\citeonline{kronauer2021latency}. O envio das respostas, cada SmartData em um
+datagrama UDP próprio, domina o custo, mas é determinado pelo sistema
+operacional e pela interface de rede, e não pelo gateway, e o caminho completo
+de um publicador ROS a um assinante através da rede SmartData ficou abaixo de
+\SI{1}{\milli\second} no 95º percentil, com perda mediana nula, até \SI{5000}{\hertz}. Em
+simulação no Gazebo, um robô TurtleBot3 Burger seguiu os comandos de
+velocidade recebidos pela rede SmartData com erro de regime inferior a
+\SI{2e-3}{\meter\per\second}. Os resultados sustentam a viabilidade de
 integrar robôs ROS 2 a ecossistemas SmartData sem comprometer o desempenho do
 laço de controle.
 
@@ -1593,238 +1599,1087 @@ responsabilidades do gerador são:
 \chapter{Plano e Execução de Experimentos}
 \label{cap:experimentos}
 
-Este capítulo apresenta o plano experimental adotado, os procedimentos de
-medição e os resultados obtidos. As métricas avaliadas são as exigidas
-pela proposta, latência de tradução e vazão sustentada de mensagens,
-complementadas pelo custo do envio das respostas pela rede e por uma
-verificação funcional de ponta a ponta. As metas correspondentes são
-derivadas das características do próprio ecossistema em que o tradutor
-opera. Para a \emph{latência}, o alvo é permanecer ao menos uma ordem de
-grandeza abaixo do piso de latência do transporte ROS 2. Trabalhos de
-caracterização mostram, no 95º percentil, valores entre um e três
-milissegundos para cargas pequenas em ROS 2
-\cite{kronauer2021latency,maruyama2016ros2}, adota-se, portanto, como
-critério de sucesso do tradutor a manutenção da latência de tradução
-abaixo de \SI{100}{\micro\second}, o que garante contribuição
-desprezível ao orçamento total. Para a \emph{vazão}, o
-alvo é sustentar uma taxa ao menos duas ordens de grandeza superior ao
-somatório das taxas nominais de amostragem dos sensores declarados no
-descritor deste trabalho, \SI{10}{\hertz} para o LiDAR de 360 feixes,
-\SI{100}{\hertz} para os seis campos da IMU e \SI{2}{\hertz} para o
-sensor de temperatura, totalizando aproximadamente
-\SI{4200}{\per\second} atualizações de SmartData, o que impede que a
-tradução se torne o gargalo do fluxo, mesmo sob variação de configuração
-ou adição de sensores.
+Este capítulo apresenta o plano experimental, os procedimentos de medição
+e os resultados obtidos. A avaliação segue a abordagem de
+\citeonline{jain1991art}: cada experimento testa uma hipótese refutável,
+formulada antes da execução, com fatores, métricas e critério de decisão
+fixados de antemão, e os resultados são acompanhados de uma medida da sua
+variabilidade. As hipóteses refinam, em termos mensuráveis, a hipótese
+geral da Seção~\ref{sec:hipotese}, e cobrem as métricas exigidas pela
+proposta, latência de tradução e vazão sustentada, o custo do envio das
+respostas pela rede, a latência de ponta a ponta através da rede SmartData
+e o seguimento de comandos por um robô simulado.
+
+Os limiares adotados derivam do ecossistema em que o gateway opera. Para a
+latência, o alvo é permanecer ao menos uma ordem de grandeza abaixo
+do piso de latência do transporte ROS 2. Trabalhos de caracterização
+mostram, no 95º percentil, valores entre um e três milissegundos para
+cargas pequenas em ROS 2 \cite{kronauer2021latency,maruyama2016ros2};
+adota-se, portanto, \SI{100}{\micro\second} como limite para a latência de
+tradução, o que garante contribuição desprezível ao orçamento total, e
+\SI{1}{\milli\second}, o próprio piso, como limite para o caminho completo
+pela rede SmartData. Para a vazão, as metas derivam de sensores
+comerciais usados em robôs móveis. Para a tradução, a referência é um
+LiDAR 3D, o Velodyne VLP-16, que produz cerca de \num{300000} pontos por
+segundo \cite{velodyne2019vlp16}: o gateway deve traduzir mais de
+$\SI{3e5}{\per\second}$ atualizações de SmartData. Para a tradução com
+envio, em que cada atualização se torna um datagrama, a referência é um
+conjunto de sensores de alta taxa: um LiDAR 2D Hokuyo UTM-30LX, com
+\num{1081} medições por varredura a \SI{40}{\hertz}
+\cite{hokuyo2012utm30lx}, cerca de \num{43000} medições por segundo, e
+uma IMU Bosch BMI088, com giroscópio a \SI{2}{\kilo\hertz} e acelerômetro
+a \SI{1.6}{\kilo\hertz} em três eixos cada \cite{bosch2018bmi088}, cerca
+de \num{11000} medições por segundo. O gateway deve, portanto, enviar
+mais de $\SI{5.4e4}{\per\second}$ datagramas.
 
 \section{Ambiente Experimental}
 \label{sec:ambiente}
 
-Todos os experimentos foram executados em um contêiner Docker baseado em
-Ubuntu 22.04 com ROS 2 Humble e Fast~DDS (\texttt{rmw\_fastrtps\_cpp})
-como implementação \textit{rmw}. O \textit{host} é uma máquina x86\_64
-com processador AMD Ryzen 7 9800X3D sob WSL2. O contêiner foi construído
-com a cadeia de \textit{build} \texttt{colcon} em modo \texttt{Release},
-com GCC 11.4, nível de otimização \texttt{-O3} e asserções desabilitadas.
-A escolha do ambiente conteinerizado garante a reprodutibilidade dos
-resultados em qualquer máquina compatível, removendo dependências de
-distribuição Linux específica.
+Todos os experimentos foram executados em um mesmo computador, um
+\textit{notebook} com processador Intel Core i7-1165G7 (quatro núcleos,
+oito \textit{threads}, \SI{2.8}{\giga\hertz}), sob Ubuntu 24.04 nativo,
+com núcleo Linux 6.17 configurado com preempção dinâmica
+(\texttt{PREEMPT\_DYNAMIC}) e o regulador de frequência em modo
+\texttt{performance}. O \textit{software} executa em um contêiner Docker
+baseado em Ubuntu 22.04, com ROS 2 Humble e Fast~DDS
+(\texttt{rmw\_fastrtps\_cpp}), compilado com \texttt{colcon} em modo
+\texttt{Release} (GCC 11.4, \texttt{-O3}, asserções desabilitadas). O
+contêiner compartilha a pilha de rede do \textit{host}, de modo que os
+datagramas da rede SmartData seguem a rota padrão do grupo multicast, que
+nesse computador é a interface Wi-Fi: cada datagrama é entregue aos
+receptores locais por cópia do próprio núcleo e transmitido pela placa sem
+fio. Nenhuma \textit{thread} foi fixada a um núcleo, e o computador não
+foi usado durante as medições.
 
-\section{Cenários}
-\label{sec:cenarios}
+\section{Hipóteses}
+\label{sec:hipoteses}
 
-\subsection{Cenário Sintético}
-O primeiro cenário usa o nó \texttt{demo\_publisher\_node}, que produz
-mensagens sintéticas com taxas e dimensões fixas: \texttt{LaserScan} com
-360 feixes a \SI{10}{\hertz}, \texttt{Imu} a \SI{100}{\hertz} e
-\texttt{Temperature} a \SI{2}{\hertz}, todas as três sob uma árvore
-\texttt{tf2} estática. Esse cenário isola o desempenho do tradutor de
-flutuações do simulador físico e permite séries longas de medição em
-condições controladas.
+A Tabela~\ref{tab:hipoteses} resume as hipóteses, os fatores variados e os
+critérios de decisão.
 
-\subsection{Cenário Gazebo}
-O segundo cenário usa o simulador Gazebo \cite{koenig2004gazebo} com o
-robô TurtleBot3 \textit{burger} no mundo \texttt{turtlebot3\_world}. As
-mensagens de sensores são produzidas pelo modelo SDF do Gazebo, com TF
-dinâmico acompanhando o movimento do robô, e o gateway e o
-\textit{proxy} operam sob o tempo simulado. O robô é conduzido em círculo
-exclusivamente por comandos SmartData: um \texttt{Twist} de
-\SI{0.10}{\meter\per\second} e \SI{0.30}{\radian\per\second} publicado em
-\texttt{/cmd\_vel\_command} é convertido pelo \textit{proxy} em comandos
-na rede e aplicado pelo gateway em \texttt{/cmd\_vel}. Esse cenário não
-substitui o sintético para fins de medição numérica precisa, pois o
-\textit{jitter} introduzido pelo simulador é dominante sobre a latência do
-tradutor, mas demonstra a capacidade da solução de operar com um robô
-representativo em movimento. Por essa razão, nenhuma métrica temporal
-deste capítulo é extraída do cenário Gazebo, que é usado exclusivamente
-na verificação funcional.
+\begin{table}[!htb]
+\centering
+\fontsize{10}{12}\selectfont
+\caption{Hipóteses, fatores e critérios de decisão dos experimentos.}
+\label{tab:hipoteses}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\begin{tabularx}{\textwidth}{@{}p{0.06\textwidth}YYY@{}}
+\toprule
+& \textbf{Hipótese} & \textbf{Fatores} & \textbf{Critério de decisão} \\
+\midrule
+H1 & A latência de tradução cresce linearmente com o número de campos da
+ mensagem e fica abaixo de \SI{100}{\micro\second} para as mensagens do
+ descritor.
+ & \texttt{LaserScan} com 10, 100, 360, \num{1000} e \num{4000} feixes;
+ \texttt{Imu}; \texttt{Temperature}; sem envio.
+ & Ajuste linear do p50 com $R^2 > 0{,}95$; p99 $<$
+ \SI{100}{\micro\second} até 360 feixes, na IMU e na temperatura. \\
+\addlinespace
+H2 & Existe uma taxa $R^*$ abaixo da qual a latência é estável e não há
+ perdas; acima dela, uma fila de profundidade 5, como a do
+ \texttt{SensorDataQoS}, transborda.
+ & Taxa ofertada em laço aberto, sem envio ($K = 0$) e com 100 respostas
+ por varredura ($K = 100$).
+ & $R^*$ é a maior taxa com perda $< 1\%$; $R^*$ supera as metas de vazão.
+ \\
+\addlinespace
+H3 & O custo do envio é linear no número $K$ de respostas e se deve ao
+ \texttt{sendto} do sistema operacional, não ao gateway.
+ & $K = 0$, 1, 10, 50 e 100, no gateway e em três bases de comparação sem
+ o gateway.
+ & Ajuste linear com $R^2 > 0{,}95$; custo por datagrama do gateway até
+ $1{,}5\times$ o do \texttt{sendto} nas mesmas condições. \\
+\addlinespace
+H4 & O caminho publicador ROS $\to$ gateway $\to$ rede $\to$
+ \textit{proxy} $\to$ assinante ROS tem p95 abaixo de
+ \SI{1}{\milli\second} e acrescenta ao salto ROS 2 direto menos que um
+ salto adicional.
+ & Taxa de publicação de \texttt{Imu}: 100, 500, \num{1000}, \num{2000} e
+ \SI{5000}{\hertz}.
+ & p95 $<$ \SI{1}{\milli\second}; perda $< 1\%$; sobrecarga do p50 menor
+ que o p50 do salto direto. \\
+\addlinespace
+H5 & O robô segue os \textit{setpoints} enviados pela rede SmartData, com
+ erro de regime pequeno e atraso de comando de poucos milissegundos.
+ & Sequência de degraus de velocidade linear e angular no Gazebo.
+ & $|\text{erro}| < \max(0{,}01;\ 5\%\ \text{do comando})$. \\
+\bottomrule
+\end{tabularx}
+\legend{Fonte: elaborada pelo autor.}
+\end{table}
 
-\section{Métricas e Procedimentos}
+\section{Procedimentos}
 \label{sec:metricas}
 
-\subsection{Latência de Tradução}
-A latência é medida sobre a entrega de uma mensagem \texttt{LaserScan} de
-100 feixes ao \texttt{Source} do tópico, com os 100 transdutores e
-SmartData correspondentes instanciados, em uma série de \num{20000}
-iterações. O intervalo medido compreende a extração de cada feixe, a
-aplicação dos filtros, o registro de cada amostra e a notificação de cada
-SmartData. A medição usa \texttt{std::chrono::steady\_clock}
-imediatamente antes e depois da chamada, sem envolvimento de DDS nem da
-pilha de rede, pois nenhum interesse está associado, o objetivo é isolar
-o custo da tradução propriamente dita, conforme definido na proposta. O
-95º percentil é relatado como métrica primária, com o teste falhando se
-ultrapassar o critério de aceitação de \SI{100}{\micro\second}.
+\subsection{Repetição e Estatísticas}
+Cada configuração é executada várias vezes, cada vez em um processo novo,
+para que a variação entre execuções, decorrente do posicionamento da
+memória, do escalonamento e do estado do processador, apareça nos
+resultados: 30 repetições nos experimentos H1 e H3, cinco nos experimentos
+H2 e H4, e três no H5, cujas execuções duram minutos. Em cada repetição,
+as latências são medidas com \texttt{std::chrono::steady\_clock}, após um
+aquecimento inicial descartado, e resumidas pelo mínimo, pelos percentis
+5, 50, 95, 99 e 99,9 e pelo máximo. Entre as repetições, relata-se a
+mediana de cada estatística, acompanhada de um intervalo de confiança de
+95\% obtido por \textit{bootstrap} da mediana. Os valores apresentados nas
+tabelas seguem esse formato, com o intervalo entre colchetes quando
+relevante.
 
-\subsection{Latência de Tradução e Envio}
-A mesma medição é repetida, em \num{2000} iterações, com um SmartData
-remoto interessado em todos os feixes associado aos 100 SmartData. Nessa
-configuração, cada mensagem produz também 100 respostas de
-\SI{78}{\byte}, cada uma enviada em seu próprio datagrama, e o intervalo
-medido passa a incluir a construção e o envio dessas respostas. O valor é
-reportado para caracterização do custo da rede, sem critério de
-aceitação próprio.
+O número de amostras necessário depende do percentil: o p50 depende do
+centro da distribuição e se estabiliza com poucas centenas de amostras,
+enquanto o p99 é determinado apenas pelo 1\% mais lento e exige muitas
+mais. Por isso, a suficiência das amostras é avaliada em cada hipótese
+sobre a estatística que decide o critério: considera-se que o número de
+amostras basta quando o intervalo de confiança dessa estatística não
+cruza o limiar de decisão. Os percentis de cauda de configurações com
+poucas amostras por repetição são relatados apenas de forma descritiva,
+sem participar das decisões.
 
-\subsection{Vazão Sustentada}
-A vazão é medida em um \textit{loop} fechado: a mesma mensagem de 100
-feixes é entregue repetidamente ao \texttt{Source} por uma janela de
-\SI{500}{\milli\second}, e o número de iterações completas é contado, nas
-duas configurações acima. A métrica derivada é o número de varreduras por
-segundo que o tradutor suporta. Como o \textit{loop} é fechado e
-executa em uma única \textit{thread}, sem espera entre as entregas, essa
-vazão corresponde aproximadamente ao inverso da latência média de
-tradução. A medição separada verifica que esse custo se mantém sob carga
-contínua e, na configuração com envio, expõe o limite imposto pela rede,
-que a latência isolada não revela. O critério de sucesso deriva do agregado
-de entrada declarado no descritor: somando LiDAR (360 feixes \(\times\)
-\SI{10}{\hertz}), IMU (6 campos \(\times\) \SI{100}{\hertz}) e
-temperatura (\SI{2}{\hertz}), obtém-se aproximadamente
-\SI{4200}{\per\second} atualizações de SmartData, exige-se que a vazão da
-tradução supere esse total em pelo menos duas ordens de grandeza, ou
-seja, \(\SI{4.2e5}{\per\second}\) atualizações, o que corresponde a cerca
-de \SI{4200}{\per\second} varreduras completas de 100 feixes, e que a
-vazão com envio supere o próprio agregado. Os valores efetivos são
-reportados para caracterização.
+\subsection{Latência de Tradução (H1)}
+O cenário sintético entrega mensagens diretamente ao \texttt{Source}
+gerado do tópico, com todos os transdutores e SmartData correspondentes
+instanciados, e mede o intervalo da chamada, que compreende a extração de
+cada campo, a aplicação dos filtros, a conversão de unidade, o registro de
+cada amostra e a notificação de cada SmartData. Nenhum interesse está
+associado, de modo que nada é enviado: o objetivo é isolar o custo da
+tradução propriamente dita. São medidas \num{20000} mensagens por
+repetição, número definido a partir de uma série única de \num{200000}
+traduções de um \texttt{LaserScan} de 100 feixes, sobre cujos prefixos
+crescentes se determinou a partir de quantas iterações cada percentil
+permanece a $\pm 5\%$ do valor final (Seção~\ref{sec:res-h1}). As
+mensagens medidas são \texttt{LaserScan} de 10 a \num{4000} feixes, que
+traçam a curva de latência por tamanho e localizam o ponto em que o
+limite é ultrapassado, e as mensagens \texttt{Imu} e \texttt{Temperature}
+do descritor.
 
-\subsection{Verificação Funcional}
-A corretude da solução é verificada por cinco suítes de testes
-automatizados, com 43 casos ao todo, executadas a cada compilação. A
-suíte \texttt{test\_si\_units} cobre a codificação da unidade. A suíte
-\texttt{test\_smartdata\_runtime} cobre o \textit{layout} das mensagens e
-o modelo de execução SmartData: o silêncio de um SmartData anunciado sem interesse
-e de um SmartData privado, os interesses orientados a eventos e
-periódicos, a menor validade na resposta, a região, o dispositivo
-específico, a revogação e o vencimento das associações, a aceitação de
-validade menor que o período, os comandos, que só alcançam SmartData
-comandados, e a função de fusão. A suíte \texttt{test\_gateway\_pipeline}
-cobre os transdutores gerados e contém as medições de desempenho. A suíte
-\texttt{test\_bus\_roundtrip} percorre o caminho completo, de um
-publicador ROS ao gateway, à rede, ao \textit{proxy} e de volta ao ROS, e
-de uma mensagem de comando ao \texttt{/cmd\_vel}, com interesses
-orientados a eventos e periódicos. A suíte \texttt{test\_imports}
-verifica os imports com produtores estrangeiros, cada um com a sua
-própria rede e os seus próprios dispositivos. Por fim, nos dois cenários,
-as taxas dos tópicos recuperados exclusivamente pela rede SmartData são
-comparadas às dos tópicos originais com \texttt{ros2 topic hz}.
+\subsection{Carga em Laço Aberto (H2)}
+Em um laço fechado, cada mensagem só é produzida após o término da
+anterior, e a medição ignora o tempo que as mensagens passariam
+aguardando em uma fila sob carga real. Por isso, a vazão é medida em laço
+aberto: uma \textit{thread} produtora gera mensagens em instantes
+agendados a uma taxa fixa, independentemente do atendimento, e as deposita
+em uma fila que mantém apenas as cinco mais recentes, como a política
+\textit{keep last} do \texttt{SensorDataQoS}, uma \textit{thread}
+consumidora retira e traduz as mensagens. A latência é medida desde o
+instante agendado de chegada, e não desde o início do atendimento,
+incluindo a espera na fila. Cada taxa é mantida por \SI{2}{\second}, com e
+sem o envio de 100 respostas por varredura, e registram-se a taxa servida,
+a fração de mensagens perdidas por transbordo da fila e a latência. A
+decisão depende apenas da perda, contada sobre todas as mensagens
+ofertadas, nas taxas mais baixas, com poucas centenas de mensagens por
+repetição, o p99 da latência é descritivo.
+
+\subsection{Custo do Envio (H3)}
+Para medir o envio, $K$ SmartData remotos registram interesse, cada um em
+um feixe específico, de modo que cada varredura de 100 feixes produz $K$
+respostas, cada uma em seu próprio datagrama, como no TSTP. O intervalo
+medido passa a incluir a construção e o envio dessas respostas, em
+\num{2000} iterações por repetição. Para separar o custo do gateway do
+custo do sistema operacional, o mesmo número de datagramas é enviado sem o
+gateway, em três bases de comparação: um \textit{socket} UDP cru; um
+\textit{socket} cru com um receptor local inscrito no grupo multicast,
+condição em que o núcleo entrega uma cópia de cada datagrama ao próprio
+computador, como ocorre quando o \textit{proxy} executa na mesma máquina;
+e a classe de rede do sistema de suporte à execução
+(\texttt{sd::Network}), que também mantém um receptor no grupo. O custo
+por datagrama é a inclinação do p50 em função de $K$, estatística que se
+estabiliza com as \num{2000} iterações de cada repetição; o p95 e o p99
+são relatados apenas para caracterizar a cauda.
+
+\subsection{Latência de Ponta a Ponta (H4)}
+Neste experimento executam, como processos separados, um publicador de
+mensagens \texttt{Imu}, o \texttt{gateway\_node}, o \texttt{proxy\_node},
+um publicador da transformação estática do sensor e um nó de sondagem. O
+publicador carimba cada mensagem com o relógio no instante da publicação.
+A sonda assina tanto o tópico original, um salto ROS 2 direto que serve de
+base de comparação, quanto o tópico reconstruído pelo \textit{proxy}
+exclusivamente a partir da rede SmartData, e registra, para cada mensagem,
+a diferença entre o instante de recepção e o carimbo. Como todos os
+processos leem o mesmo relógio, essa diferença é a latência do caminho. A
+mensagem \texttt{Imu} é composta: o \textit{proxy} a republica assim que
+seus seis campos chegam, sem esperar a mensagem seguinte. Cada taxa é
+mantida por \SI{10}{\second}, o que resulta em \num{1000} a
+\num{50000} mensagens por repetição, e o número de mensagens recebidas em
+cada caminho é comparado ao número de mensagens publicadas. Na taxa mais
+baixa, o p95 de cada repetição apoia-se em 50 amostras, e a sua
+suficiência é avaliada pelo intervalo de confiança entre as
+repetições.
+
+\subsection{Seguimento de Comandos (H5)}
+O cenário Gazebo \cite{koenig2004gazebo} usa o robô TurtleBot3
+\textit{burger} em um mundo vazio, sob o tempo simulado. Um nó publica em
+\texttt{/cmd\_vel\_command}, a \SI{20}{\hertz}, uma sequência de seis
+degraus de velocidade linear e angular com \SI{8}{\second} de duração
+cada, o \textit{proxy} converte cada mensagem em comandos SmartData, e o
+gateway, ao recebê-los, publica o \textit{setpoint} em \texttt{/cmd\_vel}.
+O erro de regime de cada degrau é a diferença entre o comando e a média da
+velocidade medida pela odometria do robô na segunda metade do degrau. O
+atraso de comando é o intervalo, em tempo real, entre a primeira
+publicação de cada degrau e o aparecimento do novo valor em
+\texttt{/cmd\_vel}.
 
 \section{Resultados}
 \label{sec:resultados}
 
-Os valores a seguir correspondem a três execuções consecutivas das
-medições; quando variam entre as execuções, é relatado o intervalo
-observado.
-
-\subsection{Latência}
-A latência mediana de tradução foi de \SI{6.6}{\micro\second}, com 95º
-percentil entre \SI{8.1}{\micro\second} e \SI{8.3}{\micro\second} para um
-\texttt{LaserScan} de 100 feixes, ou cerca de \SI{80}{\nano\second} por
-feixe, incluindo o registro da amostra e a notificação do SmartData. Esse
-valor é mais de uma ordem de grandeza inferior ao critério de aceitação
-derivado da literatura (\SI{100}{\micro\second},
-Seção~\ref{sec:metricas}) e mais de duas ordens de grandeza inferior ao
-piso de latência do ROS 2 para cargas pequenas reportado por
-\citeonline{kronauer2021latency}.
-
-Com um consumidor interessado em todos os feixes, a mediana passou a
-\SIrange{1.4}{1.6}{\milli\second}, e o 95º percentil, a
-\SIrange{2.2}{2.5}{\milli\second} por varredura, ou cerca de
-\SIrange{22}{25}{\micro\second} por resposta enviada. O custo, portanto,
-é dominado pela rede, e não pela tradução: cada SmartData é uma mensagem
-independente, como no TSTP, e cada mensagem custa uma chamada de sistema
-\texttt{sendto}, executada, neste ambiente, sobre a pilha de rede
-virtualizada do WSL2.
-
-\subsection{Vazão}
-O \textit{loop} fechado mediu entre \(1{,}41 \times 10^5\) e
-\(1{,}45 \times 10^5\) varreduras por segundo de \texttt{LaserScan} de
-100 feixes em uma única \textit{thread}, equivalente a cerca de
-\(1{,}4 \times 10^7\) atualizações de SmartData por segundo, mais de
-trinta vezes o critério de \(\SI{4.2e5}{\per\second}\). Com o envio das
-respostas, a vazão caiu para 650 a 770 varreduras por segundo, ou
-\(6{,}5 \times 10^4\) a \(7{,}7 \times 10^4\) datagramas por segundo,
-entre 15 e 18 vezes o agregado de \SI{4200}{\per\second} declarado no
-descritor. A vazão do gateway é, assim, limitada pelo envio na rede, e
-não pelo custo da tradução.
-
-\subsection{Verificação Funcional}
-As 43 verificações automatizadas foram aprovadas em execuções repetidas.
-No cenário sintético, os tópicos recuperados pelo \textit{proxy}
-exclusivamente a partir da rede SmartData apresentaram
-\SI{10.0}{\hertz} para o \texttt{LaserScan}, \SI{99.8}{\hertz} para o
-\texttt{Imu} e \SI{2.0}{\hertz} para o \texttt{Temperature}, as mesmas
-taxas dos sensores, e o gateway enviou cerca de \num{4200} datagramas por
-segundo, exatamente o agregado declarado. Uma mensagem publicada em
-\texttt{/cmd\_vel\_command} resultou em uma única mensagem completa em
-\texttt{/cmd\_vel}. No cenário Gazebo, o \texttt{/imu} do robô, a
-\SI{199.7}{\hertz}, foi recuperado a \SI{199.7}{\hertz}, e o
-\texttt{/scan}, a \SI{5.0}{\hertz}, foi recuperado a \SI{5.0}{\hertz},
-sem mensagens incompletas, enquanto a odometria do robô confirmou a
-velocidade comandada pela rede SmartData,
-\SI{0.10}{\meter\per\second} e \SI{0.30}{\radian\per\second}. Em um mundo
-sem obstáculos ao alcance do LiDAR, todos os feixes são infinitos e
-descartados pelo filtro, de modo que nenhuma resposta de distância é
-produzida, comportamento esperado do filtro declarado.
-
-\subsection{Síntese}
-
-A Tabela~\ref{tab:resultados} reúne as métricas medidas e as metas
-definidas na Seção~\ref{sec:metricas}. Todas as metas quantitativas foram
-atendidas com folga: a tradução ficou mais de dez vezes abaixo do limite
-de latência e mais de trinta vezes acima da vazão exigida, e mesmo com o
-envio pela rede a vazão superou em mais de quinze vezes o agregado
-declarado no descritor. O único custo comparável ao do próprio ROS 2 é o
-do envio, caracterizado aqui sem meta prévia e discutido na
-Seção~\ref{sec:discussao}. As taxas dos tópicos recuperados coincidiram
-com as dos sensores nos dois cenários.
+\subsection{Latência de Tradução (H1)}
+\label{sec:res-h1}
+A Tabela~\ref{tab:h1} e a Figura~\ref{fig:h1} apresentam a latência de
+tradução por mensagem. O p50 do \texttt{LaserScan} cresce linearmente com
+o número de feixes, cerca de \SI{72}{\nano\second} por feixe, com
+$R^2 = 0{,}9987$, o que inclui, para cada feixe, a extração, o filtro, o
+registro da amostra e a notificação do SmartData. O p99 permanece abaixo
+de \SI{100}{\micro\second} até \num{1000} feixes e ultrapassa o limite
+entre \num{1000} e \num{4000} feixes; pela inclinação do p99, o ponto de
+ruptura fica em torno de \num{1300} feixes. Para as mensagens do
+descritor, o p99 é de \SI{26.8}{\micro\second} no \texttt{LaserScan} de
+360 feixes, \SI{0.51}{\micro\second} na IMU e \SI{0.10}{\micro\second} na
+temperatura. A hipótese H1 é, portanto, confirmada.
 
 \begin{table}[!htb]
 \centering
-\fontsize{11}{13}\selectfont
-\caption{Síntese das métricas medidas frente às metas da proposta.}
+\fontsize{10}{12}\selectfont
+\caption{Latência de tradução por mensagem (\si{\micro\second}), mediana
+ de 30 repetições de \num{20000} mensagens.}
+\label{tab:h1}
+\begin{tabular}{@{}lrrrrrrr@{}}
+\toprule
+\textbf{Mensagem} & \textbf{Campos} & \textbf{p50} & \textbf{p95} &
+ \textbf{p99} & \textbf{p99,9} & \textbf{Máx.} & \textbf{IC do máx.} \\
+\midrule
+\texttt{Temperature} & 1 & 0,10 & 0,10 & 0,10 & 0,14 & 4,8 & [3,9; 7,5] \\
+\texttt{Imu} & 6 & 0,48 & 0,50 & 0,51 & 0,90 & 13,2 & [11,3; 14,7] \\
+\texttt{LaserScan} & 10 & 0,78 & 0,79 & 0,80 & 2,01 & 18,9 & [16,9; 20,9] \\
+\texttt{LaserScan} & 100 & 7,00 & 7,64 & 7,87 & 9,41 & 38,8 & [34,4; 49,7] \\
+\texttt{LaserScan} & 360 & 25,1 & 25,9 & 26,8 & 30,0 & 84,9 & [53,2; 109,5] \\
+\texttt{LaserScan} & \num{1000} & 69,3 & 71,5 & 74,4 & 87,1 & 141,5 & [131,3; 195,6] \\
+\texttt{LaserScan} & \num{4000} & 290,0 & 301,2 & 320,7 & 378,7 & 501,3 & [484,6; 529,5] \\
+\bottomrule
+\end{tabular}
+\legend{Fonte: elaborada pelo autor.}
+\end{table}
+
+\begin{figure}[!htb]
+\centering
+\caption{Latência de tradução do \texttt{LaserScan} em função do número de
+ feixes (à esquerda) e cauda da distribuição acumulada das latências de
+ uma repetição, acima do 90º percentil (à direita). A linha tracejada marca o limite de
+ \SI{100}{\micro\second}.}
+\label{fig:h1}
+\begin{tikzpicture}
+\begin{axis}[
+    name=esq, width=0.48\textwidth, height=0.42\textwidth,
+    xmode=log, ymode=log, xlabel={feixes}, ylabel={latência (\si{\micro\second})},
+    legend style={font=\scriptsize, at={(0.03,0.97)}, anchor=north west},
+    tick label style={font=\scriptsize}, label style={font=\small},
+    ymin=0.3, ymax=1000]
+  \addplot+[mark=*, mark size=1.5pt] coordinates {(10,0.7775) (100,6.996) (360,25.1235) (1000,69.33) (4000,290.03)};
+  \addplot+[mark=square*, mark size=1.5pt] coordinates {(10,0.803) (100,7.8745) (360,26.7725) (1000,74.35) (4000,320.7)};
+  \addplot+[mark=triangle*, mark size=1.5pt] coordinates {(10,18.9015) (100,38.771) (360,84.8625) (1000,141.49) (4000,501.26)};
+  \addplot[dashed, gray, domain=10:4000] {100};
+  \legend{p50, p99, máx.}
+\end{axis}
+\begin{axis}[
+    at={(esq.east)}, anchor=west, xshift=1.6cm,
+    width=0.48\textwidth, height=0.42\textwidth,
+    xmode=log, xlabel={latência (\si{\micro\second})}, ylabel={fração acumulada},
+    legend style={font=\scriptsize, at={(0.97,0.03)}, anchor=south east},
+    tick label style={font=\scriptsize}, label style={font=\small},
+    ymin=0.9, ymax=1.005]
+      \addplot+[mark=none] coordinates {(0.663,0) (0.672,0.05) (0.679,0.1) (0.682,0.15) (0.686,0.2) (0.696,0.25) (0.763,0.3) (0.766,0.35) (0.768,0.4) (0.77,0.45) (0.772,0.5) (0.775,0.55) (0.778,0.6) (0.781,0.65) (0.783,0.7) (0.785,0.75) (0.786,0.8) (0.787,0.85) (0.789,0.9) (0.789,0.905) (0.79,0.91) (0.79,0.915) (0.79,0.92) (0.791,0.925) (0.791,0.93) (0.792,0.935) (0.793,0.94) (0.793,0.945) (0.794,0.95) (0.794,0.955) (0.795,0.96) (0.796,0.965) (0.797,0.97) (0.798,0.975) (0.799,0.98) (0.8,0.985) (0.806,0.99) (1.046,0.995) (70.463,1)};
+      \addplot+[mark=none] coordinates {(6.49,0) (6.602,0.05) (6.626,0.1) (6.64,0.15) (6.651,0.2) (6.66,0.25) (6.669,0.3) (6.678,0.35) (6.686,0.4) (6.694,0.45) (6.702,0.5) (6.711,0.55) (6.72,0.6) (6.73,0.65) (6.743,0.7) (6.758,0.75) (6.78,0.8) (6.809,0.85) (7.563,0.9) (7.578,0.905) (7.593,0.91) (7.606,0.915) (7.619,0.92) (7.629,0.925) (7.64,0.93) (7.648,0.935) (7.657,0.94) (7.664,0.945) (7.673,0.95) (7.681,0.955) (7.697,0.96) (7.714,0.965) (7.729,0.97) (7.744,0.975) (7.762,0.98) (7.78,0.985) (7.804,0.99) (8.402,0.995) (48.942,1)};
+      \addplot+[mark=none] coordinates {(23.334,0) (23.732,0.05) (23.886,0.1) (23.979,0.15) (24.034,0.2) (24.084,0.25) (24.128,0.3) (24.171,0.35) (24.218,0.4) (24.263,0.45) (24.326,0.5) (24.395,0.55) (24.472,0.6) (24.539,0.65) (24.583,0.7) (24.624,0.75) (24.667,0.8) (24.72,0.85) (24.8,0.9) (24.812,0.905) (24.825,0.91) (24.836,0.915) (24.849,0.92) (24.86,0.925) (24.875,0.93) (24.896,0.935) (24.919,0.94) (24.946,0.945) (24.978,0.95) (25.008,0.955) (25.048,0.96) (25.138,0.965) (25.292,0.97) (25.507,0.975) (25.756,0.98) (27.027,0.985) (27.782,0.99) (28.627,0.995) (62.324,1)};
+      \addplot+[mark=none] coordinates {(64.046,0) (65.078,0.05) (65.282,0.1) (65.448,0.15) (65.611,0.2) (65.884,0.25) (66.148,0.3) (66.294,0.35) (66.399,0.4) (66.503,0.45) (66.606,0.5) (66.694,0.55) (66.798,0.6) (66.92,0.65) (67.076,0.7) (67.393,0.75) (67.768,0.8) (67.995,0.85) (68.259,0.9) (68.304,0.905) (68.359,0.91) (68.394,0.915) (68.435,0.92) (68.504,0.925) (68.586,0.93) (68.695,0.935) (68.851,0.94) (69.053,0.945) (69.536,0.95) (71.861,0.955) (74.402,0.96) (75.045,0.965) (75.622,0.97) (76.136,0.975) (76.451,0.98) (76.79,0.985) (79.028,0.99) (86.738,0.995) (184.632,1)};
+      \addplot+[mark=none] coordinates {(264,0) (270.603,0.05) (271.58,0.1) (272.268,0.15) (272.883,0.2) (273.467,0.25) (274.074,0.3) (274.728,0.35) (275.384,0.4) (276.073,0.45) (276.736,0.5) (277.331,0.55) (277.846,0.6) (278.319,0.65) (278.804,0.7) (279.335,0.75) (279.96,0.8) (280.844,0.85) (282.477,0.9) (282.683,0.905) (282.961,0.91) (283.249,0.915) (283.531,0.92) (283.798,0.925) (284.123,0.93) (284.464,0.935) (284.823,0.94) (285.226,0.945) (285.76,0.95) (286.438,0.955) (287.511,0.96) (289.357,0.965) (292.338,0.97) (296.446,0.975) (302.849,0.98) (307.903,0.985) (315.622,0.99) (337.648,0.995) (645.066,1)};
+  \addplot[dashed, gray] coordinates {(100,0.9) (100,1.005)};
+  \legend{10, 100, 360, \num{1000}, \num{4000}}
+\end{axis}
+\end{tikzpicture}
+\legend{Fonte: elaborada pelo autor.}
+\end{figure}
+
+O máximo se comporta de outra forma. Ele é um único evento entre
+\num{20000} e decorre de interrupções e preempções do sistema operacional,
+e não do trabalho de tradução, o que se reflete nos intervalos de
+confiança largos. O máximo permanece abaixo de \SI{100}{\micro\second}
+até 360 feixes, mas o intervalo de confiança para 360 feixes já alcança
+\SI{109}{\micro\second}, e para \num{1000} feixes o máximo chega a
+\SI{141}{\micro\second}. Em um núcleo Linux sem preempção total, a
+latência no pior caso é limitada pela plataforma, e não pelo gateway, e o
+critério adotado refere-se, por isso, ao p99.
+
+A suficiência das \num{20000} iterações por repetição foi verificada sobre
+uma série única de \num{200000} traduções. A
+Tabela~\ref{tab:convergencia} e a Figura~\ref{fig:convergencia} mostram
+os percentis em função do número de iterações. O p50 estabiliza a partir
+de \num{4000} iterações, o p99 a partir de \num{16000}, e o p95 e o
+p99,9 a partir de \num{64000}. Com 500 iterações, o p99,9 superestima o
+valor final em sete vezes, e com \num{2000} iterações o p99 ainda o
+superestima em 20\%. A instabilidade do p95 tem outra origem: a
+distribuição é bimodal, com cerca de 85\% das amostras perto de
+\SI{6.7}{\micro\second} e o restante perto de \SI{7.6}{\micro\second}
+(Figura~\ref{fig:h1}), e o p95 fica na fronteira entre os dois modos,
+deslocando-se com a proporção entre eles. As \num{20000} iterações usadas
+em cada repetição do H1 bastam, portanto, para o p50 e o p99, e a mediana
+de 30 repetições, com o seu intervalo de confiança estreito, compensa a
+sensibilidade do p95 e do p99,9.
+
+\begin{table}[!htb]
+\centering
+\fontsize{10}{12}\selectfont
+\caption{Percentis da latência de tradução (\si{\micro\second}) sobre
+ prefixos crescentes de uma série de \num{200000} traduções de um
+ \texttt{LaserScan} de 100 feixes.}
+\label{tab:convergencia}
+\begin{tabular}{@{}rrrrr@{}}
+\toprule
+\textbf{Iterações} & \textbf{p50} & \textbf{p95} & \textbf{p99} & \textbf{p99,9} \\
+\midrule
+500 & 8,04 & 8,13 & 11,66 & 63,82 \\
+\num{2000} & 7,96 & 8,11 & 9,69 & 14,99 \\
+\num{4000} & 7,32 & 8,10 & 9,04 & 14,42 \\
+\num{16000} & 7,28 & 8,03 & 8,28 & 10,41 \\
+\num{64000} & 7,27 & 7,40 & 8,11 & 9,23 \\
+\num{200000} & 7,25 & 7,38 & 8,07 & 9,03 \\
+\bottomrule
+\end{tabular}
+\legend{Fonte: elaborada pelo autor.}
+\end{table}
+
+\begin{figure}[!htb]
+\centering
+\caption{Percentis da latência de tradução em função do número de
+ iterações.}
+\label{fig:convergencia}
+\begin{tikzpicture}
+\begin{axis}[
+    width=0.75\textwidth, height=0.42\textwidth,
+    xmode=log, ymode=log, xlabel={iterações}, ylabel={latência (\si{\micro\second})},
+    legend style={font=\scriptsize, at={(0.97,0.97)}, anchor=north east},
+    tick label style={font=\scriptsize}, label style={font=\small}]
+  \addplot+[mark size=1.5pt] coordinates {(500,8.042) (1000,7.992) (2000,7.963) (4000,7.32) (8000,7.29) (16000,7.28) (32000,7.29) (64000,7.27) (128000,7.26) (200000,7.25)};
+  \addplot+[mark size=1.5pt] coordinates {(500,8.131) (1000,8.12) (2000,8.108) (4000,8.10) (8000,8.07) (16000,8.03) (32000,7.96) (64000,7.40) (128000,7.39) (200000,7.38)};
+  \addplot+[mark size=1.5pt] coordinates {(500,11.661) (1000,10.41) (2000,9.693) (4000,9.04) (8000,8.86) (16000,8.28) (32000,8.18) (64000,8.11) (128000,8.08) (200000,8.07)};
+  \addplot+[mark size=1.5pt] coordinates {(500,63.821) (1000,63.821) (2000,14.986) (4000,14.42) (8000,11.64) (16000,10.41) (32000,9.57) (64000,9.23) (128000,9.16) (200000,9.03)};
+  \legend{p50, p95, p99, p99{,}9}
+\end{axis}
+\end{tikzpicture}
+\legend{Fonte: elaborada pelo autor.}
+\end{figure}
+
+\subsection{Carga em Laço Aberto (H2)}
+A Tabela~\ref{tab:h2} e a Figura~\ref{fig:h2} mostram a taxa servida, as
+perdas e a latência em função da taxa ofertada. Sem envio, a latência
+mediana permanece em torno de \SI{8.5}{\micro\second} e não há perdas até
+\num{90000} varreduras por segundo. A \num{120000} varreduras por segundo,
+a perda chega a 1,1\%, e a taxa servida satura em cerca de \num{118700}
+varreduras por segundo, o inverso do tempo de serviço de
+\SI{8.4}{\micro\second}. Acima desse ponto, a fila permanece cheia, e a
+latência mediana passa a cerca de \SI{40}{\micro\second}, o tempo de
+atendimento das cinco mensagens à frente na fila, enquanto o excedente é
+descartado. Com 100 respostas por varredura, não há perdas até
+\num{1000} varreduras, ou \num{100000} datagramas, por segundo, e a taxa
+servida satura em cerca de \num{1080} varreduras por segundo; a
+\num{1000} varreduras por segundo, o p99 já sobe para
+\SI{2.1}{\milli\second}, sinal da proximidade da saturação.
+
+\begin{table}[!htb]
+\centering
+\fontsize{10}{12}\selectfont
+\caption{Carga em laço aberto com \texttt{LaserScan} de 100 feixes:
+ taxa servida, perda por transbordo da fila e latência desde a chegada
+ agendada, mediana de cinco repetições.}
+\label{tab:h2}
+\begin{tabular}{@{}rrrrr@{\hspace{2em}}rrrrr@{}}
+\toprule
+\multicolumn{5}{c}{\textbf{Sem envio ($K = 0$)}} & \multicolumn{5}{c}{\textbf{Com envio ($K = 100$)}} \\
+\cmidrule(r{2em}){1-5}\cmidrule{6-10}
+\textbf{Ofertada} & \textbf{Servida} & \textbf{Perda} & \textbf{p50} & \textbf{p99} &
+\textbf{Ofertada} & \textbf{Servida} & \textbf{Perda} & \textbf{p50} & \textbf{p99} \\
+(\si{\per\second}) & (\si{\per\second}) & & (\si{\micro\second}) & (\si{\micro\second}) &
+(\si{\per\second}) & (\si{\per\second}) & & (\si{\micro\second}) & (\si{\micro\second}) \\
+\midrule
+\num{1000} & \num{1000} & 0\% & 7,5 & 8,8 & 50 & 50 & 0\% & 379 & 520 \\
+\num{10000} & \num{10000} & 0\% & 8,5 & 9,4 & 100 & 100 & 0\% & 376 & 450 \\
+\num{30000} & \num{30000} & 0\% & 8,5 & 11,2 & 200 & 200 & 0\% & 374 & 459 \\
+\num{60000} & \num{60000} & 0\% & 8,5 & 11,9 & 400 & 400 & 0\% & 400 & 488 \\
+\num{90000} & \num{90000} & 0\% & 8,6 & 18,1 & 600 & 600 & 0\% & 401 & 503 \\
+\num{120000} & \num{118650} & 1,1\% & 40,1 & 50,0 & 800 & 800 & 0\% & 420 & 539 \\
+\num{140000} & \num{118658} & 15\% & 40,6 & 44,3 & \num{1000} & \num{1000} & 0\% & 437 & \num{2080} \\
+\num{160000} & \num{118757} & 26\% & 36,5 & 39,8 & \num{1500} & \num{1076} & 28\% & \num{3764} & \num{5243} \\
+\num{200000} & \num{117547} & 41\% & 31,0 & 33,8 & \num{2000} & \num{1081} & 46\% & \num{3187} & \num{4562} \\
+\bottomrule
+\end{tabular}
+\legend{Fonte: elaborada pelo autor.}
+\end{table}
+
+\begin{figure}[!htb]
+\centering
+\caption{Taxa servida em função da taxa ofertada, sem envio (à esquerda) e
+ com 100 respostas por varredura (à direita). A linha tracejada indica a
+ taxa servida igual à ofertada.}
+\label{fig:h2}
+\begin{tikzpicture}
+\begin{axis}[
+    name=esq, width=0.48\textwidth, height=0.42\textwidth,
+    xlabel={ofertada ($10^3$/s)}, ylabel={servida ($10^3$/s)},
+    tick label style={font=\scriptsize}, label style={font=\small},
+    xmin=0, xmax=210, ymin=0, ymax=210, title={\small $K = 0$}]
+  \addplot[dashed, gray, domain=0:210] {x};
+  \addplot+[mark size=1.5pt] coordinates {(1,1.0005) (10,10.0004) (30,30.0002) (60,59.9994) (90,89.9959) (120,118.65) (140,118.658) (160,118.757) (200,117.547)};
+\end{axis}
+\begin{axis}[
+    at={(esq.east)}, anchor=west, xshift=1.6cm,
+    width=0.48\textwidth, height=0.42\textwidth,
+    xlabel={ofertada (/s)}, ylabel={servida (/s)},
+    tick label style={font=\scriptsize}, label style={font=\small},
+    xmin=0, xmax=2100, ymin=0, ymax=2100, title={\small $K = 100$}]
+  \addplot[dashed, gray, domain=0:2100] {x};
+  \addplot+[mark size=1.5pt] coordinates {(50,50.4954) (100,100.484) (200,200.463) (400,400.419) (600,600.381) (800,800.331) (1000,1000.28) (1500,1076.35) (2000,1081.45)};
+\end{axis}
+\end{tikzpicture}
+\legend{Fonte: elaborada pelo autor.}
+\end{figure}
+
+Assim, $R^*$ é de \num{90000} varreduras por segundo sem envio, entre as
+taxas avaliadas, o que corresponde a $9 \times 10^6$ atualizações de
+SmartData por segundo, trinta vezes a meta de
+$\SI{3e5}{\per\second}$ do LiDAR 3D, e de \num{1000} varreduras por
+segundo com envio, ou \num{100000} datagramas por segundo, quase o dobro
+da meta de $\SI{5.4e4}{\per\second}$ do LiDAR 2D com a IMU. A hipótese H2
+é confirmada: o ponto de saturação existe, é delimitado, e fica acima das
+duas metas de vazão.
+
+\subsection{Custo do Envio (H3)}
+A Tabela~\ref{tab:h3} e a Figura~\ref{fig:h3} comparam o gateway às bases
+de comparação. Em todas as configurações com receptor local, o custo é
+praticamente o mesmo: com $K = 100$, uma varredura com tradução e envio
+custa \SI{1012}{\micro\second} no gateway e
+\SIrange{999}{1000}{\micro\second} no \textit{socket} com receptor e na
+classe de rede, diferença da ordem da própria tradução dos 100 feixes
+(\SI{7.6}{\micro\second}). A inclinação do p50 em $K$ é de
+\SI{9.4}{\micro\second} por datagrama no gateway e de
+\SI{9.9}{\micro\second} nas bases de comparação, razão de
+$1{,}0\times$. Com uma única resposta, o envio acrescenta
+\SI{5.0}{\micro\second} à tradução, contra \SI{3.5}{\micro\second} do
+\texttt{sendto} com receptor local, razão de $1{,}4\times$, ainda dentro
+do critério. A entrega local custa cerca de \SI{1.3}{\micro\second} por
+datagrama, diferença entre o \textit{socket} cru com e sem receptor para
+$K = 1$.
+
+\begin{table}[!htb]
+\centering
+\fontsize{10}{12}\selectfont
+\caption{Latência por varredura de 100 feixes (\si{\micro\second}) em
+ função do número $K$ de respostas enviadas: p50 / p95, mediana de 30
+ repetições.}
+\label{tab:h3}
+\begin{tabular}{@{}rcccc@{}}
+\toprule
+$K$ & \textbf{Gateway} & \textbf{\texttt{sd::Network}} &
+ \textbf{\textit{Socket} cru} & \textbf{Cru com receptor} \\
+\midrule
+0 & 7,6 / 7,8 & --- & --- & --- \\
+1 & 12,6 / 14,6 & 3,5 / 4,3 & 2,2 / 2,8 & 3,5 / 4,2 \\
+10 & 46 / 649 & 35 / 691 & 20 / 817 & 35 / 700 \\
+50 & 202 / \num{1180} & 185 / \num{1187} & 101 / \num{1160} & 180 / \num{1179} \\
+100 & \num{1012} / \num{2004} & 999 / \num{1965} & \num{1004} / \num{1761} & \num{1000} / \num{1931} \\
+\bottomrule
+\end{tabular}
+\legend{Fonte: elaborada pelo autor.}
+\end{table}
+
+\begin{figure}[!htb]
+\centering
+\caption{Mediana da latência por varredura em função do número $K$ de
+ respostas, no gateway e nas bases de comparação sem o gateway.}
+\label{fig:h3}
+\begin{tikzpicture}
+\begin{axis}[
+    width=0.75\textwidth, height=0.42\textwidth,
+    xmode=log, ymode=log, xlabel={respostas por varredura ($K$)}, ylabel={p50 (\si{\micro\second})},
+    legend style={font=\scriptsize, at={(0.03,0.97)}, anchor=north west},
+    tick label style={font=\scriptsize}, label style={font=\small}]
+  \addplot+[mark size=1.5pt] coordinates {(1,12.643) (10,46.0365) (50,202.28) (100,1011.7)};
+  \addplot+[mark size=1.5pt] coordinates {(1,3.5355) (10,34.9895) (50,184.8625) (100,998.5)};
+  \addplot+[mark size=1.5pt] coordinates {(1,2.241) (10,19.8065) (50,100.642) (100,1003.95)};
+  \addplot+[mark size=1.5pt] coordinates {(1,3.5255) (10,34.581) (50,180.022) (100,999.99)};
+  \legend{gateway, \texttt{sd::Network}, \textit{socket} cru, cru com receptor}
+\end{axis}
+\end{tikzpicture}
+\legend{Fonte: elaborada pelo autor.}
+\end{figure}
+
+O custo, no entanto, não é linear em $K$. Por datagrama, o
+\textit{socket} cru custa cerca de \SI{2}{\micro\second} até $K = 50$ e
+\SI{10}{\micro\second} com $K = 100$, e, a partir de $K = 10$, o p95 salta
+para centenas de microssegundos em todas as configurações. O ajuste linear
+resulta em $R^2 \approx 0{,}90$, abaixo do critério, e essa parte da
+hipótese é refutada. Como a não linearidade aparece de forma idêntica no
+\textit{socket} cru, sem o gateway e sem receptor, ela não se deve ao
+gateway, mas ao caminho de saída do sistema operacional: o comportamento é
+compatível com o esgotamento do \textit{buffer} de envio do
+\textit{socket}, cujo espaço só é liberado quando os datagramas deixam a
+interface. Com poucas respostas, o \texttt{sendto} apenas enfileira o
+datagrama e retorna; com rajadas maiores, passa a aguardar a transmissão
+pela placa Wi-Fi, e o custo por datagrama converge para o da interface. A
+segunda parte da hipótese, que atribui o custo ao sistema operacional e
+não ao gateway, é confirmada.
+
+\subsection{Latência de Ponta a Ponta (H4)}
+A Tabela~\ref{tab:h4} e a Figura~\ref{fig:h4} comparam o salto ROS 2
+direto ao caminho completo pela rede SmartData. Em todas as taxas, o p95
+do caminho pelo gateway permaneceu abaixo de \SI{1}{\milli\second}, com o
+maior valor, \SI{675}{\micro\second}, a \SI{100}{\hertz}, com intervalo
+de confiança de \SIrange{632}{739}{\micro\second}, distante do limiar, e a perda
+mediana foi nula; a maior perda em uma repetição isolada foi de 1,4\%, a
+\SI{5000}{\hertz}. A sobrecarga do p50 foi de \SI{263}{\micro\second} a
+\SI{100}{\hertz}, \SI{91}{\micro\second} a \SI{500}{\hertz} e entre
+\SI{56}{\micro\second} e \SI{79}{\micro\second} de \num{1000} a
+\SI{5000}{\hertz}. Ela é menor que o salto direto a 100 e
+\SI{500}{\hertz}, mas o supera de \num{1000} a \SI{5000}{\hertz}. As
+duas primeiras partes da hipótese H4 são confirmadas, e a terceira é
+refutada a partir de \SI{1000}{\hertz}.
+
+\begin{table}[!htb]
+\centering
+\fontsize{10}{12}\selectfont
+\caption{Latência de ponta a ponta de mensagens \texttt{Imu}
+ (\si{\micro\second}) pelo salto ROS 2 direto e pelo caminho gateway
+ $\to$ rede SmartData $\to$ \textit{proxy}, mediana de cinco repetições.}
+\label{tab:h4}
+\begin{tabular}{@{}rrrrrrrr@{}}
+\toprule
+& \multicolumn{3}{c}{\textbf{Direto}} & \multicolumn{3}{c}{\textbf{Pelo gateway}} & \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+\textbf{Taxa (\si{\hertz})} & \textbf{p50} & \textbf{p95} & \textbf{p99} &
+ \textbf{p50} & \textbf{p95} & \textbf{p99} & \textbf{Sobrecarga do p50} \\
+\midrule
+100 & 284 & 358 & 384 & 547 & 675 & 731 & +263 \\
+500 & 139 & 220 & 264 & 231 & 368 & 422 & +91 \\
+\num{1000} & 58 & 165 & 198 & 137 & 265 & 303 & +79 \\
+\num{2000} & 43 & 73 & 86 & 101 & 127 & 147 & +58 \\
+\num{5000} & 18 & 23 & 27 & 74 & 86 & 100 & +56 \\
+\bottomrule
+\end{tabular}
+\legend{Fonte: elaborada pelo autor.}
+\end{table}
+
+\begin{figure}[!htb]
+\centering
+\caption{Mediana (marcadores cheios) e 95º percentil (marcadores vazios)
+ da latência de ponta a ponta em função da taxa de publicação. A linha
+ tracejada marca o limite de \SI{1}{\milli\second}.}
+\label{fig:h4}
+\begin{tikzpicture}
+\begin{axis}[
+    width=0.75\textwidth, height=0.42\textwidth,
+    xmode=log, ymode=log, xlabel={taxa de publicação (\si{\hertz})}, ylabel={latência (\si{\micro\second})},
+    legend style={font=\scriptsize, at={(0.03,0.03)}, anchor=south west},
+    tick label style={font=\scriptsize}, label style={font=\small},
+    ymin=10, ymax=1500]
+  \addplot[blue, mark=*, mark size=1.5pt] coordinates {(100,284.476) (500,139.282) (1000,58.304) (2000,43.3) (5000,17.6)};
+  \addplot[red, mark=square*, mark size=1.5pt] coordinates {(100,547.131) (500,230.614) (1000,137.328) (2000,101.1) (5000,73.7)};
+  \addplot[blue, mark=o, mark size=1.5pt, densely dotted] coordinates {(100,358.283) (500,220.032) (1000,164.801) (2000,72.9) (5000,22.6)};
+  \addplot[red, mark=square, mark size=1.5pt, densely dotted] coordinates {(100,675.432) (500,368.181) (1000,265.359) (2000,126.7) (5000,85.8)};
+  \addplot[dashed, gray, domain=100:5000] {1000};
+  \legend{direto, pelo gateway}
+\end{axis}
+\end{tikzpicture}
+\legend{Fonte: elaborada pelo autor.}
+\end{figure}
+
+O resultado mais saliente, porém, é a dependência da latência em relação
+à taxa: o próprio salto direto leva \SI{284}{\micro\second} a
+\SI{100}{\hertz} e \SI{18}{\micro\second} a \SI{5000}{\hertz}, e a
+sobrecarga do gateway acompanha essa tendência. Esse comportamento é
+compatível com os estados de economia de energia do processador: em taxas
+baixas, os processos dormem entre uma mensagem e outra, o núcleo entra em
+estados de repouso profundos, e cada mensagem paga o tempo de despertar do
+núcleo e do processo. O regulador de frequência em modo
+\texttt{performance} não desabilita esses estados. O caminho pelo gateway
+contém dois processos a mais, o gateway e o \textit{proxy}, e paga esse
+custo em cada um deles. A \SI{5000}{\hertz}, quando os processos quase não
+dormem, a sobrecarga de \SI{56}{\micro\second} aproxima o custo intrínseco
+do caminho: a tradução dos seis campos, inferior a um microssegundo, o
+envio de seis datagramas, a reconstrução da mensagem pelo \textit{proxy} e
+um salto ROS 2 adicional, da republicação até a sonda. O critério relativo
+ao salto direto mostrou-se, assim, inadequado para taxas altas, em que o
+salto direto, sem tradução nem rede, é excepcionalmente barato; o critério
+absoluto, de p95 abaixo do piso de \SI{1}{\milli\second}, foi atendido em
+todas as taxas.
+
+\subsection{Seguimento de Comandos (H5)}
+A Tabela~\ref{tab:h5} e a Figura~\ref{fig:h5} mostram a resposta do robô
+aos degraus de velocidade. O erro de regime foi o mesmo nas três
+repetições, com o maior valor, \SI{1.8e-3}{\meter\per\second}, no degrau de
+\SI{0.05}{\meter\per\second} e \SI{0.80}{\radian\per\second}, 3,6\% do
+comando e abaixo da tolerância de $0{,}01$. O atraso de comando, entre a
+publicação em \texttt{/cmd\_vel\_command} e o aparecimento do
+\textit{setpoint} em \texttt{/cmd\_vel}, ficou entre
+\SI{2.15}{\milli\second} e \SI{2.41}{\milli\second}, com mediana de
+\SI{2.34}{\milli\second}, dos quais \SI{2}{\milli\second} correspondem à
+janela de coalescência do atuador, que agrupa os campos de uma mesma
+mensagem em um único \textit{setpoint}
+(Seção~\ref{sec:dinamica}); o restante, cerca de
+\SI{0.3}{\milli\second}, corresponde aos dois saltos ROS 2 e ao envio
+pela rede. A hipótese H5 é confirmada.
+
+\begin{table}[!htb]
+\centering
+\fontsize{10}{12}\selectfont
+\caption{Erro de regime e atraso de comando por degrau, nas três
+ repetições do cenário Gazebo.}
+\label{tab:h5}
+\begin{tabular}{@{}crrrrc@{}}
+\toprule
+\textbf{Degrau} & \textbf{$v$ (\si{\meter\per\second})} &
+ \textbf{$\omega$ (\si{\radian\per\second})} & \textbf{Erro de $v$} &
+ \textbf{Erro de $\omega$} & \textbf{Atraso (\si{\milli\second})} \\
+\midrule
+0 & 0,00 & 0,00 & $<10^{-4}$ & $<10^{-4}$ & 2,33--2,38 \\
+1 & 0,10 & 0,30 & $-6 \times 10^{-4}$ & $<10^{-4}$ & 2,25--2,36 \\
+2 & 0,20 & $-0,50$ & $+9 \times 10^{-4}$ & $-3 \times 10^{-4}$ & 2,20--2,34 \\
+3 & 0,05 & 0,80 & $-1{,}8 \times 10^{-3}$ & $-5 \times 10^{-4}$ & 2,15--2,41 \\
+4 & 0,15 & 0,00 & $<10^{-4}$ & $<10^{-4}$ & 2,17--2,38 \\
+5 & 0,00 & 0,00 & $<10^{-4}$ & $<10^{-4}$ & 2,28--2,39 \\
+\bottomrule
+\end{tabular}
+\legend{Fonte: elaborada pelo autor.}
+\end{table}
+
+\begin{figure}[!htb]
+\centering
+\caption{Velocidades linear (à esquerda) e angular (à direita) comandadas
+ pela rede SmartData e medidas pela odometria do robô, na primeira
+ repetição do cenário Gazebo.}
+\label{fig:h5}
+\pgfplotstableread{
+        t cv cw ov ow
+        0.037 0 0 0 -0
+        0.173 0 0 0.0001 0
+        0.309 0 0 0.0001 0
+        0.445 0 0 0.0002 0
+        0.581 0 0 0.0001 0
+        0.717 0 0 -0 -0
+        0.853 0 0 -0.0002 -0
+        0.989 0 0 -0.0001 -0
+        1.125 0 0 -0.0001 -0
+        1.261 0 0 -0 -0
+        1.397 0 0 0 0
+        1.533 0 0 0.0001 0
+        1.669 0 0 0.0002 0
+        1.805 0 0 0.0001 0
+        1.941 0 0 -0 -0
+        2.077 0 0 -0.0001 -0
+        2.213 0 0 -0.0001 -0
+        2.349 0 0 -0 -0
+        2.485 0 0 0.0001 0
+        2.621 0 0 0.0001 0
+        2.757 0 0 0.0001 0
+        2.893 0 0 -0.0001 -0
+        3.029 0 0 -0.0001 -0
+        3.165 0 0 -0 -0
+        3.301 0 0 0 0
+        3.437 0 0 0.0001 0
+        3.573 0 0 -0 -0
+        3.709 0 0 -0.0001 -0
+        3.845 0 0 -0 0
+        3.981 0 0 0 0
+        4.117 0 0 0 0
+        4.253 0 0 -0 -0
+        4.389 0 0 -0 -0
+        4.525 0 0 0 0
+        4.661 0 0 0 0
+        4.797 0 0 -0 -0
+        4.933 0 0 -0 -0
+        5.069 0 0 0 0
+        5.205 0 0 0 0
+        5.341 0 0 0 -0
+        5.477 0 0 -0 -0
+        5.613 0 0 0 -0
+        5.749 0 0 0 0
+        5.885 0 0 0 -0
+        6.021 0 0 -0 -0
+        6.157 0 0 -0 -0
+        6.293 0 0 0 0
+        6.429 0 0 0 -0
+        6.565 0 0 -0 -0
+        6.701 0 0 -0 -0
+        6.837 0 0 0 -0
+        6.973 0 0 0 -0
+        7.109 0 0 0 -0
+        7.245 0 0 -0 -0
+        7.381 0 0 0 -0
+        7.517 0 0 0 -0
+        7.653 0 0 0 -0
+        7.789 0 0 -0 -0
+        7.925 0 0 0 -0
+        8.061 0.1 0.3 0.034 0
+        8.197 0.1 0.3 0.0991 0.3348
+        8.333 0.1 0.3 0.0991 0.2908
+        8.469 0.1 0.3 0.0991 0.2925
+        8.605 0.1 0.3 0.0995 0.2972
+        8.741 0.1 0.3 0.0995 0.2993
+        8.877 0.1 0.3 0.0986 0.2999
+        9.013 0.1 0.3 0.0991 0.3
+        9.149 0.1 0.3 0.0993 0.3
+        9.285 0.1 0.3 0.0995 0.2999
+        9.421 0.1 0.3 0.0994 0.3
+        9.557 0.1 0.3 0.0993 0.3
+        9.693 0.1 0.3 0.0994 0.3
+        9.829 0.1 0.3 0.0995 0.3
+        9.965 0.1 0.3 0.0993 0.3
+        10.1 0.1 0.3 0.0993 0.3001
+        10.24 0.1 0.3 0.0995 0.3
+        10.37 0.1 0.3 0.0995 0.2999
+        10.51 0.1 0.3 0.0994 0.3001
+        10.64 0.1 0.3 0.0993 0.3001
+        10.78 0.1 0.3 0.0994 0.3
+        10.92 0.1 0.3 0.0994 0.3
+        11.05 0.1 0.3 0.0994 0.3
+        11.19 0.1 0.3 0.0994 0.3001
+        11.32 0.1 0.3 0.0994 0.2999
+        11.46 0.1 0.3 0.0994 0.2999
+        11.6 0.1 0.3 0.0994 0.2999
+        11.73 0.1 0.3 0.0994 0.3
+        11.87 0.1 0.3 0.0995 0.2999
+        12.01 0.1 0.3 0.0994 0.3
+        12.14 0.1 0.3 0.0994 0.2999
+        12.28 0.1 0.3 0.0995 0.3
+        12.41 0.1 0.3 0.0994 0.3
+        12.55 0.1 0.3 0.0995 0.2999
+        12.69 0.1 0.3 0.0994 0.2999
+        12.82 0.1 0.3 0.0995 0.2999
+        12.96 0.1 0.3 0.0994 0.3
+        13.09 0.1 0.3 0.0995 0.2999
+        13.23 0.1 0.3 0.0994 0.3
+        13.37 0.1 0.3 0.0994 0.3
+        13.5 0.1 0.3 0.0994 0.2999
+        13.64 0.1 0.3 0.0995 0.2999
+        13.77 0.1 0.3 0.0995 0.2999
+        13.91 0.1 0.3 0.0995 0.2999
+        14.04 0.1 0.3 0.0994 0.3
+        14.18 0.1 0.3 0.0994 0.3
+        14.32 0.1 0.3 0.0995 0.2999
+        14.45 0.1 0.3 0.0994 0.3
+        14.59 0.1 0.3 0.0995 0.3
+        14.72 0.1 0.3 0.0994 0.3
+        14.86 0.1 0.3 0.0994 0.3
+        15 0.1 0.3 0.0994 0.3
+        15.13 0.1 0.3 0.0994 0.2999
+        15.27 0.1 0.3 0.0994 0.3
+        15.4 0.1 0.3 0.0995 0.2999
+        15.54 0.1 0.3 0.0994 0.2999
+        15.68 0.1 0.3 0.0994 0.3001
+        15.81 0.1 0.3 0.0994 0.2999
+        15.95 0.1 0.3 0.0994 0.3
+        16.09 0.2 -0.5 0.151 0.0704
+        16.22 0.2 -0.5 0.2005 -0.53
+        16.36 0.2 -0.5 0.2004 -0.4994
+        16.49 0.2 -0.5 0.201 -0.4969
+        16.63 0.2 -0.5 0.1999 -0.4983
+        16.77 0.2 -0.5 0.2001 -0.4997
+        16.9 0.2 -0.5 0.2006 -0.5
+        17.04 0.2 -0.5 0.2007 -0.4999
+        17.17 0.2 -0.5 0.2007 -0.4999
+        17.31 0.2 -0.5 0.2006 -0.5
+        17.45 0.2 -0.5 0.2007 -0.5002
+        17.58 0.2 -0.5 0.2008 -0.4998
+        17.72 0.2 -0.5 0.201 -0.4998
+        17.85 0.2 -0.5 0.1989 -0.5209
+        17.99 0.2 -0.5 0.2001 -0.5235
+        18.12 0.2 -0.5 0.2008 -0.4992
+        18.26 0.2 -0.5 0.2008 -0.4969
+        18.4 0.2 -0.5 0.2008 -0.4986
+        18.53 0.2 -0.5 0.2009 -0.4996
+        18.67 0.2 -0.5 0.2009 -0.5
+        18.8 0.2 -0.5 0.2009 -0.5003
+        18.94 0.2 -0.5 0.201 -0.4998
+        19.08 0.2 -0.5 0.201 -0.4998
+        19.21 0.2 -0.5 0.201 -0.5002
+        19.35 0.2 -0.5 0.2009 -0.5001
+        19.48 0.2 -0.5 0.2009 -0.5051
+        19.62 0.2 -0.5 0.201 -0.5013
+        19.76 0.2 -0.5 0.2008 -0.5006
+        19.89 0.2 -0.5 0.2007 -0.5002
+        20.03 0.2 -0.5 0.2006 -0.4998
+        20.16 0.2 -0.5 0.2007 -0.5001
+        20.3 0.2 -0.5 0.2007 -0.5004
+        20.44 0.2 -0.5 0.2008 -0.4999
+        20.57 0.2 -0.5 0.2011 -0.5001
+        20.71 0.2 -0.5 0.2008 -0.5002
+        20.84 0.2 -0.5 0.2011 -0.5
+        20.98 0.2 -0.5 0.2008 -0.5002
+        21.12 0.2 -0.5 0.2008 -0.5002
+        21.25 0.2 -0.5 0.201 -0.5001
+        21.39 0.2 -0.5 0.2008 -0.4999
+        21.52 0.2 -0.5 0.2008 -0.5
+        21.66 0.2 -0.5 0.2009 -0.5001
+        21.8 0.2 -0.5 0.201 -0.5001
+        21.93 0.2 -0.5 0.2009 -0.4999
+        22.07 0.2 -0.5 0.2009 -0.4999
+        22.2 0.2 -0.5 0.201 -0.5003
+        22.34 0.2 -0.5 0.201 -0.5001
+        22.48 0.2 -0.5 0.2009 -0.4999
+        22.61 0.2 -0.5 0.2009 -0.4998
+        22.75 0.2 -0.5 0.2009 -0.5003
+        22.89 0.2 -0.5 0.2008 -0.5001
+        23.02 0.2 -0.5 0.2007 -0.5004
+        23.16 0.2 -0.5 0.2011 -0.5001
+        23.29 0.2 -0.5 0.2007 -0.5
+        23.43 0.2 -0.5 0.2008 -0.4999
+        23.57 0.2 -0.5 0.2007 -0.5004
+        23.7 0.2 -0.5 0.2008 -0.5002
+        23.84 0.2 -0.5 0.2011 -0.4998
+        23.97 0.2 -0.5 0.2008 -0.5002
+        24.11 0.05 0.8 0.167 -0.5013
+        24.25 0.05 0.8 0.0919 0.3401
+        24.38 0.05 0.8 0.0482 0.7814
+        24.52 0.05 0.8 0.0487 0.7846
+        24.65 0.05 0.8 0.0488 0.794
+        24.79 0.05 0.8 0.049 0.7983
+        24.93 0.05 0.8 0.0485 0.7997
+        25.06 0.05 0.8 0.0484 0.7997
+        25.2 0.05 0.8 0.0489 0.8002
+        25.33 0.05 0.8 0.0487 0.8001
+        25.47 0.05 0.8 0.0486 0.7991
+        25.61 0.05 0.8 0.0483 0.7995
+        25.74 0.05 0.8 0.048 0.7998
+        25.88 0.05 0.8 0.0481 0.7996
+        26.01 0.05 0.8 0.0482 0.7997
+        26.15 0.05 0.8 0.0486 0.7996
+        26.29 0.05 0.8 0.048 0.7998
+        26.42 0.05 0.8 0.048 0.7997
+        26.56 0.05 0.8 0.0481 0.7996
+        26.69 0.05 0.8 0.0482 0.7995
+        26.83 0.05 0.8 0.048 0.7997
+        26.96 0.05 0.8 0.048 0.7997
+        27.1 0.05 0.8 0.0481 0.7996
+        27.24 0.05 0.8 0.0481 0.7996
+        27.37 0.05 0.8 0.0486 0.7996
+        27.51 0.05 0.8 0.0485 0.7997
+        27.64 0.05 0.8 0.048 0.7996
+        27.78 0.05 0.8 0.0486 0.7996
+        27.92 0.05 0.8 0.048 0.7995
+        28.05 0.05 0.8 0.048 0.7996
+        28.19 0.05 0.8 0.048 0.7995
+        28.32 0.05 0.8 0.0486 0.7995
+        28.46 0.05 0.8 0.0481 0.7996
+        28.6 0.05 0.8 0.0486 0.7995
+        28.73 0.05 0.8 0.048 0.7996
+        28.87 0.05 0.8 0.048 0.7996
+        29 0.05 0.8 0.0481 0.7996
+        29.14 0.05 0.8 0.0486 0.7995
+        29.28 0.05 0.8 0.0481 0.7995
+        29.41 0.05 0.8 0.048 0.7995
+        29.55 0.05 0.8 0.048 0.7995
+        29.68 0.05 0.8 0.048 0.7995
+        29.82 0.05 0.8 0.048 0.7996
+        29.96 0.05 0.8 0.048 0.7995
+        30.09 0.05 0.8 0.048 0.7995
+        30.23 0.05 0.8 0.0481 0.7995
+        30.36 0.05 0.8 0.0481 0.7996
+        30.5 0.05 0.8 0.0481 0.7994
+        30.64 0.05 0.8 0.048 0.7995
+        30.77 0.05 0.8 0.0485 0.7995
+        30.91 0.05 0.8 0.0481 0.7996
+        31.05 0.05 0.8 0.048 0.7996
+        31.18 0.05 0.8 0.048 0.7995
+        31.32 0.05 0.8 0.0486 0.7994
+        31.45 0.05 0.8 0.0481 0.7995
+        31.59 0.05 0.8 0.048 0.7995
+        31.73 0.05 0.8 0.048 0.7994
+        31.86 0.05 0.8 0.048 0.7994
+        32 0.05 0.8 0.0486 0.7994
+        32.13 0.15 0 0.1004 0.5698
+        32.27 0.15 0 0.1497 -0.0284
+        32.41 0.15 0 0.1497 0.0009
+        32.54 0.15 0 0.1501 0.0033
+        32.68 0.15 0 0.1495 0.0016
+        32.81 0.15 0 0.1496 0.0005
+        32.95 0.15 0 0.1495 0
+        33.09 0.15 0 0.1494 -0
+        33.22 0.15 0 0.1496 -0
+        33.36 0.15 0 0.1498 -0
+        33.49 0.15 0 0.1499 -0
+        33.63 0.15 0 0.15 0
+        33.77 0.15 0 0.15 0
+        33.9 0.15 0 0.15 -0
+        34.04 0.15 0 0.15 0
+        34.17 0.15 0 0.15 0
+        34.31 0.15 0 0.15 0
+        34.45 0.15 0 0.15 0
+        34.58 0.15 0 0.15 0
+        34.72 0.15 0 0.15 0
+        34.85 0.15 0 0.15 0
+        34.99 0.15 0 0.15 0
+        35.12 0.15 0 0.15 0
+        35.26 0.15 0 0.15 0
+        35.4 0.15 0 0.15 0
+        35.53 0.15 0 0.15 0
+        35.67 0.15 0 0.15 0
+        35.8 0.15 0 0.15 0
+        35.94 0.15 0 0.15 0
+        36.08 0.15 0 0.15 0
+        36.21 0.15 0 0.15 0
+        36.35 0.15 0 0.15 -0
+        36.48 0.15 0 0.15 -0
+        36.62 0.15 0 0.15 0
+        36.76 0.15 0 0.15 0
+        36.89 0.15 0 0.15 0
+        37.03 0.15 0 0.15 0
+        37.16 0.15 0 0.15 -0
+        37.3 0.15 0 0.15 -0
+        37.44 0.15 0 0.15 -0
+        37.57 0.15 0 0.15 0
+        37.71 0.15 0 0.15 0
+        37.84 0.15 0 0.15 -0
+        37.98 0.15 0 0.15 0
+        38.12 0.15 0 0.15 0
+        38.25 0.15 0 0.15 0
+        38.39 0.15 0 0.15 0
+        38.52 0.15 0 0.15 0
+        38.66 0.15 0 0.15 0
+        38.8 0.15 0 0.15 0
+        38.93 0.15 0 0.15 0
+        39.07 0.15 0 0.15 0
+        39.2 0.15 0 0.15 0
+        39.34 0.15 0 0.15 -0
+        39.48 0.15 0 0.15 0
+        39.61 0.15 0 0.15 0
+        39.75 0.15 0 0.15 0
+        39.88 0.15 0 0.15 -0
+        40.02 0.15 0 0.15 -0
+        40.16 0 0 0.0481 -0.0011
+        40.29 0 0 -0 -0.0001
+        40.43 0 0 0.0003 -0.0001
+        40.56 0 0 0.0003 -0
+        40.7 0 0 0.0004 -0
+        40.84 0 0 0 0
+        40.97 0 0 -0.0001 -0
+        41.11 0 0 0.0003 -0
+        41.24 0 0 0.0004 0
+        41.38 0 0 -0 -0
+        41.52 0 0 -0.0001 -0
+        41.65 0 0 0.0005 -0
+        41.79 0 0 -0.0001 -0
+        41.92 0 0 -0 -0
+        42.06 0 0 0.0002 0
+        42.2 0 0 0.0001 0
+        42.33 0 0 0 0
+        42.47 0 0 0 0
+        42.6 0 0 0 0
+        42.74 0 0 -0 0
+        42.88 0 0 0 0
+        43.01 0 0 0 0
+        43.15 0 0 0 0
+        43.28 0 0 -0 0
+        43.42 0 0 0 0
+        43.56 0 0 0 0
+        43.69 0 0 0 0
+        43.83 0 0 -0 -0
+        43.97 0 0 0 -0
+        44.1 0 0 0 0
+        44.24 0 0 0 0
+        44.37 0 0 0 -0
+        44.51 0 0 -0 -0
+        44.65 0 0 0 -0
+        44.78 0 0 0 0
+        44.92 0 0 0 -0
+        45.05 0 0 0 -0
+        45.19 0 0 0 -0
+        45.33 0 0 0 -0
+        45.46 0 0 0 0
+        45.6 0 0 0 0
+        45.73 0 0 0 0
+        45.87 0 0 0 0
+        46.01 0 0 0 0
+        46.14 0 0 0 0
+        46.28 0 0 0 0
+        46.41 0 0 0 -0
+        46.55 0 0 0 0
+        46.69 0 0 0 0
+        46.82 0 0 0 -0
+        46.96 0 0 0 0
+        47.09 0 0 0 0
+        47.23 0 0 0 0
+        47.37 0 0 0 0
+        47.5 0 0 0 0
+        47.64 0 0 0 0
+        47.77 0 0 0 0
+        47.91 0 0 0 0
+}\hfivedata
+\begin{tikzpicture}
+\begin{axis}[
+    name=esq, width=0.5\textwidth, height=0.38\textwidth,
+    xlabel={tempo simulado (\si{\second})}, ylabel={$v$ (\si{\meter\per\second})},
+    tick label style={font=\scriptsize}, label style={font=\small},
+    legend style={font=\scriptsize, at={(0.97,0.97)}, anchor=north east},
+    xmin=0, xmax=48]
+  \addplot[gray, dashed, thick] table[x=t, y=cv] {\hfivedata};
+  \addplot[blue] table[x=t, y=ov] {\hfivedata};
+  \legend{comando, odometria}
+\end{axis}
+\begin{axis}[
+    at={(esq.east)}, anchor=west, xshift=1.2cm,
+    width=0.5\textwidth, height=0.38\textwidth,
+    xlabel={tempo simulado (\si{\second})}, ylabel={$\omega$ (\si{\radian\per\second})},
+    tick label style={font=\scriptsize}, label style={font=\small},
+    xmin=0, xmax=48]
+  \addplot[gray, dashed, thick] table[x=t, y=cw] {\hfivedata};
+  \addplot[red] table[x=t, y=ow] {\hfivedata};
+\end{axis}
+\end{tikzpicture}
+\legend{Fonte: elaborada pelo autor.}
+\end{figure}
+
+\subsection{Síntese}
+A Tabela~\ref{tab:resultados} reúne o veredito de cada hipótese. As
+hipóteses H1, H2 e H5 foram confirmadas. Das hipóteses H3 e H4, foram
+confirmadas as partes que tratam do custo do gateway e do limite absoluto
+de latência, e refutadas as que supunham linearidade do envio e uma
+sobrecarga menor que um salto ROS 2 em todas as taxas; em ambos os casos,
+a causa identificada está na plataforma, e não no gateway.
+
+\begin{table}[!htb]
+\centering
+\fontsize{10}{12}\selectfont
+\caption{Síntese dos resultados frente aos critérios de decisão.}
 \label{tab:resultados}
 \newcolumntype{Y}{>{\raggedright\arraybackslash}X}
-\begin{tabularx}{\textwidth}{@{}p{0.38\textwidth}YY@{}}
+\begin{tabularx}{\textwidth}{@{}p{0.06\textwidth}YY>{\raggedright\arraybackslash}p{0.2\textwidth}@{}}
 \toprule
-\textbf{Métrica} & \textbf{Meta} & \textbf{Medido} \\
+& \textbf{Critério} & \textbf{Medido} & \textbf{Veredito} \\
 \midrule
-Latência de tradução
- \newline (\texttt{LaserScan}, 100 feixes)
-& $<$ \SI{100}{\micro\second}
- \newline (piso de \SI{1}{\milli\second} \cite{kronauer2021latency} $\div$ 10)
-& \SIrange{8.1}{8.3}{\micro\second} (p95) \\
+H1 & Linear, $R^2 > 0{,}95$; p99 $<$ \SI{100}{\micro\second} até 360
+ feixes
+ & \SI{72}{\nano\second}/feixe, $R^2 = 0{,}999$; p99 de
+ \SI{26.8}{\micro\second} (360 feixes); ruptura em cerca de \num{1300}
+ feixes
+ & Confirmada \\
 \addlinespace
-Vazão de tradução
-& $>$ $4{,}2 \times 10^{5}$ atualizações/s
- \newline ($100\times$ agregado do descritor)
-& $\sim 1{,}4 \times 10^{7}$ atualizações/s \\
+H2 & $R^*$ com perda $< 1\%$ acima de $3 \times 10^5$ atualizações/s
+ sem envio e de $5{,}4 \times 10^4$ datagramas/s com envio
+ & $9 \times 10^6$ atualizações/s sem envio; $10^5$ datagramas/s com envio
+ & Confirmada \\
 \addlinespace
-Vazão com envio
-& $>$ \num{4200} datagramas/s
- \newline (agregado do descritor)
-& \(6{,}5\)--\(7{,}7 \times 10^{4}\) datagramas/s \\
+H3 & Linear, $R^2 > 0{,}95$; gateway até $1{,}5\times$ o
+ \texttt{sendto}
+ & $R^2 \approx 0{,}90$; $1{,}0\times$ (inclinação) a $1{,}4\times$
+ ($K = 1$)
+ & Linearidade refutada; atribuição confirmada \\
 \addlinespace
-Taxas recuperadas pela rede
-& iguais às dos sensores
-& sintético: 10,0 / 99,8 / \SI{2.0}{\hertz};
- \newline Gazebo: 199,7 / \SI{5.0}{\hertz} \\
+H4 & p95 $<$ \SI{1}{\milli\second}; perda $< 1\%$; sobrecarga $<$ salto
+ direto
+ & p95 $\leq$ \SI{675}{\micro\second}; perda mediana nula; sobrecarga de
+ +56 a +263~\si{\micro\second}
+ & Limite absoluto confirmado; sobrecarga relativa refutada a partir de
+ \SI{1000}{\hertz} \\
+\addlinespace
+H5 & $|\text{erro}| < \max(0{,}01;\ 5\%)$
+ & Erro máximo de $1{,}8 \times 10^{-3}$; atraso de
+ \SIrange{2.15}{2.41}{\milli\second}
+ & Confirmada \\
 \bottomrule
 \end{tabularx}
 \legend{Fonte: elaborada pelo autor.}
@@ -1833,39 +2688,51 @@ Taxas recuperadas pela rede
 \section{Discussão}
 \label{sec:discussao}
 
-Os resultados sustentam a hipótese declarada na Seção~\ref{sec:hipotese}.
-A latência da tradução é suficientemente pequena para não afetar laços
-de controle robóticos, e as mensagens recuperadas exclusivamente pela
-rede SmartData preservam as taxas dos sensores e os valores dos campos
-eleitos como semânticos. As limitações observadas durante a execução
-merecem alguns comentários.
+Os resultados sustentam a hipótese geral declarada na
+Seção~\ref{sec:hipotese}. A tradução custa \SI{72}{\nano\second} por
+campo e, para as mensagens do descritor, fica mais de três vezes abaixo do
+limite de \SI{100}{\micro\second} no p99, e o caminho completo pela rede
+SmartData fica abaixo do piso de latência do ROS 2 em todas as taxas
+avaliadas, preservando as mensagens e os comandos. As limitações
+observadas merecem alguns comentários.
 
-Primeiro, o custo do envio domina o custo total. Com um consumidor
-interessado em todos os feixes, uma varredura de 100 feixes custa algo
-entre dois e três milissegundos, valor da mesma ordem do piso de latência
-do próprio ROS 2. Esse custo decorre de cada SmartData ser uma mensagem
-própria, como no TSTP, e não da tradução, e ocorre apenas quando há
-interesse pelos dados, pois um SmartData sem interesse não envia nada.
-O agrupamento de respostas em um mesmo datagrama reduziria o número de
-chamadas de sistema, ao custo de se afastar do formato de referência.
+Primeiro, o envio domina o custo total. Com um consumidor interessado em
+todos os feixes de uma varredura de 100 feixes, o envio custa cerca de
+\SI{1}{\milli\second}, mais de cem vezes a tradução. Esse custo decorre de
+cada SmartData ser uma mensagem própria, como no TSTP, e é limitado pela
+interface de rede, e não pelo gateway: no computador avaliado, a interface
+Wi-Fi impõe um teto de cerca de \num{100000} datagramas por segundo, e uma
+interface cabeada ou dedicada deslocaria esse teto. Esse teto basta para
+um LiDAR 2D de alta resolução com uma IMU de alta taxa, mas não para um
+LiDAR 3D, cujos \num{300000} pontos por segundo, se todos fossem
+requisitados por um consumidor, excederiam em três vezes a capacidade de
+envio. O custo só ocorre
+quando há interesse pelos dados, pois um SmartData sem interesse não envia
+nada. O agrupamento de respostas em um mesmo datagrama reduziria o número
+de chamadas de sistema e de quadros transmitidos, ao custo de se afastar
+do formato de referência.
 
-Segundo, o ambiente de medição é um \textit{host} de consumo, com o
-contêiner executado sobre o WSL2. A tradução ocorre inteiramente em
-espaço de usuário, sem chamadas de sistema, e por isso é pouco afetada
-pela virtualização. O envio, ao contrário, atravessa a pilha de rede
-virtualizada do WSL2 a cada resposta, de modo que os valores medidos com
-envio devem ser lidos como pessimistas em relação a uma execução nativa
-em Linux. Resultados em \textit{hardware} embarcado, típico em robôs de
-campo, não foram avaliados. Nesses processadores, a menor frequência, a
-menor capacidade de cache e a gestão de energia devem elevar a latência
-de tradução, que depende quase exclusivamente do desempenho de um único
-núcleo, porém, o critério de aceitação seguiria cumprido para um processador
-até cerca de doze vezes mais lento que o utilizado, hipótese a ser
-verificada experimentalmente.
+Segundo, as latências dependem da taxa das mensagens. Em taxas baixas,
+típicas de sensores como a IMU a \SI{100}{\hertz}, os estados de economia
+de energia do processador acrescentam centenas de microssegundos a cada
+salto, tanto no ROS 2 direto quanto no caminho pelo gateway. Em uma
+aplicação com requisitos de tempo real, esses estados podem ser limitados
+pelo sistema operacional, configuração não avaliada neste trabalho. Do
+mesmo modo, o máximo das latências é determinado pelas interrupções e
+preempções da plataforma, e só um núcleo com preempção total e núcleos
+isolados poderia oferecer garantias sobre o pior caso.
 
-Terceiro, o cenário Gazebo confirma a operação funcional, mas suas
-medidas temporais refletem o simulador, não o tradutor, e foram
-intencionalmente excluídas da caracterização numérica.
+Terceiro, os experimentos foram executados em um único computador, um
+\textit{notebook} de uso geral, com todos os processos na mesma máquina,
+de modo que a rede SmartData foi exercitada pela entrega local e pela
+saída da interface Wi-Fi, sem um receptor remoto. Resultados em
+\textit{hardware} embarcado, típico em robôs de campo, não foram
+avaliados. Nesses processadores, a menor frequência, a menor capacidade de
+cache e a gestão de energia devem elevar a latência de tradução, que
+depende quase exclusivamente do desempenho de um único núcleo; o critério
+de aceitação seguiria cumprido, para o \texttt{LaserScan} de 360 feixes,
+em um processador até cerca de três vezes e meia mais lento que o
+utilizado, hipótese a ser verificada experimentalmente.
 
 Quarto, a implementação se afasta do conceito original em três pontos.
 Sem função de fusão, todo SmartData que satisfaz um interesse responde,
@@ -1893,18 +2760,22 @@ caminho único de tradução e um sistema de suporte à execução próprio que
 reproduz o modelo de execução de transdutores do conceito original, com modos de
 operação, interesses orientados a eventos e periódicos, regiões
 espaço-temporais, validade e comandos, em mensagens com o formato do
-TSTP. No plano da validação, demonstrou-se empiricamente que a latência
-de tradução permanece uma ordem de grandeza abaixo do critério de
-aceitação derivado do piso de latência do ROS 2
-\cite{kronauer2021latency}, que o custo adicional do envio é dominado
-pela rede, e que as mensagens recuperadas exclusivamente pela rede
-SmartData preservam as taxas dos sensores, inclusive com um robô
-simulado em movimento conduzido por comandos SmartData.
+TSTP. No plano da validação, cinco hipóteses refutáveis foram testadas
+em Linux nativo, com repetições e intervalos de confiança. Demonstrou-se
+que a latência de tradução cresce linearmente com o tamanho da mensagem,
+cerca de \SI{72}{\nano\second} por campo, e permanece abaixo do critério
+de aceitação derivado do piso de latência do ROS 2
+\cite{kronauer2021latency} para as mensagens do descritor; que o custo
+adicional do envio é determinado pelo sistema operacional e pela
+interface de rede, e não pelo gateway; que o caminho completo pela rede
+SmartData fica abaixo de \SI{1}{\milli\second} no 95º percentil; e que um
+robô simulado segue os comandos recebidos pela rede SmartData com erro de
+regime desprezível.
 
 A contribuição complementa as implementações existentes do conceito de
-SmartData, predominantemente voltadas para nós sensores embarcados,
+SmartData, predominantemente voltadas para nós de sensores embarcados,
 oferecendo uma ponte, nos dois sentidos, entre o ecossistema robótico e
-plataformas industriais, sem demandar reescrita dos sensores existentes
+plataformas \textit{IoT}, sem demandar reescrita dos sensores existentes
 ou intermediação por \textit{brokers} de aplicação.
 
 \section{Trabalhos Futuros}
@@ -1926,7 +2797,10 @@ agrupamento de respostas por datagrama permitiria reduzir o custo de
 envio dominante. Quinto, a caracterização de desempenho em
 \textit{hardware} embarcado representativo do que se encontra em robôs de
 campo permitiria contrastar os resultados deste trabalho com cenários sob
-restrições mais severas de processador, memória e banda.
+restrições mais severas de processador, memória e banda, e a repetição
+das medições com um núcleo de tempo real, núcleos isolados e estados de
+repouso limitados permitiria caracterizar o pior caso, hoje determinado
+pela plataforma.
 % ===========================================================================
 \postextual
 
