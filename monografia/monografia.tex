@@ -37,8 +37,9 @@
 \usepackage{xcolor}
 \usepackage{amssymb}
 \usepackage{amsmath}
+\usepackage[helvet]{sfmath}         % fórmulas na mesma fonte do texto
 \usepackage{siunitx}
-\sisetup{output-decimal-marker={,}, group-separator={.}, group-minimum-digits=4}
+\sisetup{output-decimal-marker={,}, group-separator={.}, group-minimum-digits=4, mode=text}
 \usepackage[brazilian,hyperpageref]{backref}
 \usepackage[alf]{abntex2cite}        % padrão ABNT autor-data
 \usepackage{csquotes}                % \enquote{...}
@@ -2040,7 +2041,7 @@ servida satura em cerca de \num{1080} varreduras por segundo; a
 \end{figure}
 
 Assim, $R^*$ é de \num{90000} varreduras por segundo sem envio, entre as
-taxas avaliadas, o que corresponde a $9 \times 10^6$ atualizações de
+taxas avaliadas, o que corresponde a \num{9e6} atualizações de
 SmartData por segundo, trinta vezes a meta de
 $\SI{3e5}{\per\second}$ do LiDAR 3D, e de \num{1000} varreduras por
 segundo com envio, ou \num{100000} datagramas por segundo, quase o dobro
@@ -2235,12 +2236,12 @@ pela rede. A hipótese H5 é confirmada.
  \textbf{$\omega$ (\si{\radian\per\second})} & \textbf{Erro de $v$} &
  \textbf{Erro de $\omega$} & \textbf{Atraso (\si{\milli\second})} \\
 \midrule
-0 & 0,00 & 0,00 & $<10^{-4}$ & $<10^{-4}$ & 2,33--2,38 \\
-1 & 0,10 & 0,30 & $-6 \times 10^{-4}$ & $<10^{-4}$ & 2,25--2,36 \\
-2 & 0,20 & $-0,50$ & $+9 \times 10^{-4}$ & $-3 \times 10^{-4}$ & 2,20--2,34 \\
-3 & 0,05 & 0,80 & $-1{,}8 \times 10^{-3}$ & $-5 \times 10^{-4}$ & 2,15--2,41 \\
-4 & 0,15 & 0,00 & $<10^{-4}$ & $<10^{-4}$ & 2,17--2,38 \\
-5 & 0,00 & 0,00 & $<10^{-4}$ & $<10^{-4}$ & 2,28--2,39 \\
+0 & 0,00 & 0,00 & $<$\,\num{e-4} & $<$\,\num{e-4} & 2,33--2,38 \\
+1 & 0,10 & 0,30 & \num{-6e-4} & $<$\,\num{e-4} & 2,25--2,36 \\
+2 & 0,20 & \num{-0.50} & \num[retain-explicit-plus]{+9e-4} & \num{-3e-4} & 2,20--2,34 \\
+3 & 0,05 & 0,80 & \num{-1.8e-3} & \num{-5e-4} & 2,15--2,41 \\
+4 & 0,15 & 0,00 & $<$\,\num{e-4} & $<$\,\num{e-4} & 2,17--2,38 \\
+5 & 0,00 & 0,00 & $<$\,\num{e-4} & $<$\,\num{e-4} & 2,28--2,39 \\
 \bottomrule
 \end{tabular}
 \legend{Fonte: elaborada pelo autor.}
@@ -2657,9 +2658,9 @@ H1 & Linear, $R^2 > 0{,}95$; p99 $<$ \SI{100}{\micro\second} até 360
  feixes
  & Confirmada \\
 \addlinespace
-H2 & $R^*$ com perda $< 1\%$ acima de $3 \times 10^5$ atualizações/s
- sem envio e de $5{,}4 \times 10^4$ datagramas/s com envio
- & $9 \times 10^6$ atualizações/s sem envio; $10^5$ datagramas/s com envio
+H2 & $R^*$ com perda $< 1\%$ acima de \num{3e5} atualizações/s
+ sem envio e de \num{5.4e4} datagramas/s com envio
+ & \num{9e6} atualizações/s sem envio; \num{e5} datagramas/s com envio
  & Confirmada \\
 \addlinespace
 H3 & Linear, $R^2 > 0{,}95$; gateway até $1{,}5\times$ o
@@ -2676,7 +2677,7 @@ H4 & p95 $<$ \SI{1}{\milli\second}; perda $< 1\%$; sobrecarga $<$ salto
  \SI{1000}{\hertz} \\
 \addlinespace
 H5 & $|\text{erro}| < \max(0{,}01;\ 5\%)$
- & Erro máximo de $1{,}8 \times 10^{-3}$; atraso de
+ & Erro máximo de \num{1.8e-3}; atraso de
  \SIrange{2.15}{2.41}{\milli\second}
  & Confirmada \\
 \bottomrule
