@@ -14,6 +14,7 @@
     a4paper,
     chapter=TITLE,
     section=TITLE,
+    english,
     brazil
 ]{abntex2}
 
@@ -33,6 +34,8 @@
 \usepackage{array}
 \usepackage{tabularx}
 \usepackage{multirow}
+\let\memnewfloat\newfloat          % \newfloat da memoir, antes que o float o substitua
+\usepackage{float}                   % [H]: figuras e tabelas entre parágrafos
 \usepackage{listings}
 \usepackage{xcolor}
 \usepackage{amssymb}
@@ -40,7 +43,6 @@
 \usepackage[helvet]{sfmath}         % fórmulas na mesma fonte do texto
 \usepackage{siunitx}
 \sisetup{output-decimal-marker={,}, group-separator={.}, group-minimum-digits=4, mode=text}
-\usepackage[brazilian,hyperpageref]{backref}
 \usepackage[alf]{abntex2cite}        % padrão ABNT autor-data
 \usepackage{csquotes}                % \enquote{...}
 \usepackage{tikz}
@@ -79,13 +81,37 @@
     numbersep=8pt,
     breaklines=true,
     showstringspaces=false,
-    captionpos=b,
+    captionpos=t,
     frame=single,
     framerule=0pt,
     xleftmargin=12pt,
     aboveskip=10pt, belowskip=10pt
 }
-\lstset{style=codestyle}
+\lstset{style=codestyle, numberbychapter=false}
+
+% lista de códigos no mesmo formato das listas de figuras e tabelas
+\renewcommand{\lstlistingname}{Código}
+\renewcommand{\lstlistlistingname}{Lista de códigos}
+\newlistof{listofcodigos}{lol}{\lstlistlistingname}
+\newlistentry{lstlisting}{lol}{0}
+\makeatletter
+\let\c@lstlisting\relax  % o contador é criado pelo listings no \begin{document}
+\let\abnt@l@lstlisting\l@lstlisting  % o tocbasic redefine a entrada no \begin{document}
+\AtBeginDocument{\let\l@lstlisting\abnt@l@lstlisting}
+\makeatother
+% quadros (conteúdo textual), separados das tabelas (dados numéricos)
+\newcommand{\quadroname}{Quadro}
+\newcommand{\listofquadrosname}{Lista de quadros}
+\memnewfloat[chapter]{quadro}{loq}{\quadroname}
+\newlistof{listofquadros}{loq}{\listofquadrosname}
+\newlistentry{quadro}{loq}{0}
+\counterwithout{quadro}{chapter}
+\renewcommand{\cftquadroname}{\quadroname\space}
+\renewcommand*{\cftquadroaftersnum}{\hfill\textendash\hfill}
+\addto\captionsbrazil{\renewcommand{\listfigurename}{Lista de figuras}}  % babel redefine a cada troca de idioma
+
+\renewcommand{\cftlstlistingname}{\lstlistingname\space}
+\renewcommand*{\cftlstlistingaftersnum}{\hfill\textendash\hfill}
 
 % ---------- dados do trabalho ----------
 \titulo{Gateway Semântico para Tradução de Mensagens ROS 2
@@ -260,11 +286,100 @@ laço de controle.
 
 \vspace{1cm}
 \noindent\textbf{Palavras-chave:}
-ROS 2; SmartData; Sistemas Ciber-Físicos; Interoperabilidade Semântica;
-Transdutores; UDP Multicast.
+ROS 2; SmartData; sistemas ciber-físicos; interoperabilidade semântica;
+transdutores; UDP multicast.
 \end{resumo}
 
-% ----- sumário e listas -----
+% ----- abstract -----
+\begin{resumo}[Abstract]
+\begin{otherlanguage*}{english}
+The convergence of mobile robotics and the Internet of Things is central to
+the implementation of Cyber-Physical Systems. The \textit{Robot Operating
+System 2} (ROS 2) has become the standard in robotic development and adopted
+the \textit{Data Distribution Service} (DDS) as its communication middleware,
+ensuring efficient message delivery. Native ROS messages, however, carry raw
+sensor data without the physical and temporal context required by autonomous
+decision-making systems. The \textit{SmartData} concept, proposed by
+Fröhlich (2018), addresses this gap by encapsulating each sensor reading in
+an envelope that carries, inseparably from the value, its unit in the
+International System of Units, the spatio-temporal origin of the datum and
+its expiry. More than a format, SmartData binds each datum to a transducer,
+which abstracts a sensor, an actuator or a data transformation. Interests
+declared between SmartData form a network through which producers answer
+remote consumers and actuators receive commands. This work designs,
+implements and evaluates a semantic \textit{gateway} that exports ROS 2
+sensors and actuators as SmartData transducers and imports SmartData messages
+into ROS 2 networks. A YAML descriptor enumerates the ROS topics and their
+decomposition rules, and a Python generator, run during the build before
+compilation, emits one transducer class per physical quantity and the
+SmartData objects that export it. Interest, response and command messages
+follow the TSTP message layout and are disseminated over UDP multicast; a
+\textit{proxy} node rebuilds the ROS messages from the responses and also
+receives SmartData from other producers. The evaluation, carried out on
+native Linux through refutable hypotheses, with repetitions and confidence
+intervals, showed that the translation latency grows linearly with the
+number of message fields, about \SI{72}{\nano\second} per field, and reaches
+\SI{26.8}{\micro\second} at the 99th percentile for a 360-beam LiDAR scan,
+below the \SI{100}{\micro\second} criterion, set as one tenth of the ROS 2
+latency floor for small payloads reported by
+\citeonline{kronauer2021latency}. Sending the responses, each SmartData in
+its own UDP datagram, dominates the cost, but is determined by the operating
+system and the network interface rather than by the gateway, and the full
+path from a ROS publisher to a subscriber through the SmartData network
+stayed below \SI{1}{\milli\second} at the 95th percentile, with zero median
+loss, up to \SI{5000}{\hertz}. In a Gazebo simulation, a TurtleBot3 Burger
+robot followed the velocity commands received through the SmartData network
+with a steady-state error below \SI{2e-3}{\meter\per\second}. The results
+support the feasibility of integrating ROS 2 robots into SmartData
+ecosystems without compromising the performance of the control loop.
+
+\vspace{1cm}
+\noindent\textbf{Keywords:}
+ROS 2; SmartData; cyber-physical systems; semantic interoperability;
+transducers; UDP multicast.
+\end{otherlanguage*}
+\end{resumo}
+
+% ----- listas e sumário -----
+\pdfbookmark[0]{\listfigurename}{lof}
+\listoffigures*
+\cleardoublepage
+
+\pdfbookmark[0]{\listofquadrosname}{loq}
+\listofquadros*
+\cleardoublepage
+
+\pdfbookmark[0]{\listtablename}{lot}
+\listoftables*
+\cleardoublepage
+
+\pdfbookmark[0]{\lstlistlistingname}{lol}
+\listofcodigos*
+\cleardoublepage
+
+% lista de abreviaturas e siglas
+\begin{siglas}
+  \item[CPS] \textit{Cyber-Physical Systems} (Sistemas Ciber-Físicos)
+  \item[DDS] \textit{Data Distribution Service}
+  \item[EPOS] \textit{Embedded Parallel Operating System}
+  \item[GCC] \textit{GNU Compiler Collection}
+  \item[IDL] \textit{Interface Definition Language}
+  \item[IMU] \textit{Inertial Measurement Unit} (Unidade de Medição Inercial)
+  \item[IoT] \textit{Internet of Things} (Internet das Coisas)
+  \item[LiDAR] \textit{Light Detection and Ranging}
+  \item[LISHA] Laboratório de Integração Software/Hardware
+  \item[OMG] \textit{Object Management Group}
+  \item[PTP] \textit{Precision Time Protocol}
+  \item[QoS] \textit{Quality of Service} (Qualidade de Serviço)
+  \item[ROS] \textit{Robot Operating System}
+  \item[SDAV] \textit{SmartData Autonomous Vehicle}
+  \item[SI] Sistema Internacional de Unidades
+  \item[TSTP] \textit{Trustful Space-Time Protocol}
+  \item[UDP] \textit{User Datagram Protocol}
+  \item[UFSC] Universidade Federal de Santa Catarina
+  \item[YAML] \textit{YAML Ain't Markup Language}
+\end{siglas}
+
 \pdfbookmark[0]{\contentsname}{toc}
 \tableofcontents*
 \cleardoublepage
@@ -614,7 +729,7 @@ sete dimensões fundamentais do SI mais radiano e esterradiano, conforme a
 Figura~\ref{fig:unidade}. Cada expoente é armazenado somado de 4, de modo
 que os três bits representam valores de \(-4\) a \(+3\).
 
-\begin{figure}[htb]
+\begin{figure}[H]
   \centering
   \caption{Codificação da unidade SI em 32 bits}
   \label{fig:unidade}
@@ -665,7 +780,7 @@ um atuador, como um condicionador de ar. Instâncias de SmartData são
 criadas por um de dois construtores, mostrados na
 Figura~\ref{fig:sd-classe}.
 
-\begin{figure}[htb]
+\begin{figure}[H]
   \centering
   \caption{Interface da classe SmartData}
   \label{fig:sd-classe}
@@ -927,7 +1042,7 @@ transdutores remotos (Seção~\ref{sec:sd-transdutores}), que anunciam interesse
 republicam as mensagens ROS reconstruídas, convertem mensagens ROS em
 comandos e recebem também SmartData de outros produtores da rede.
 
-\begin{figure}[htb]
+\begin{figure}[H]
 \centering
 \caption{Fluxo de dados entre o \texttt{gateway\_node} e o
 \texttt{proxy\_node}}
@@ -1137,6 +1252,7 @@ sensors:
                  angular_velocity.z]
     expiry_ms: 10
 \end{lstlisting}
+\legend{Fonte: elaborada pelo autor.}
 
 \section{Geração de Código Prévia à Compilação}
 \label{sec:codegen}
@@ -1288,18 +1404,18 @@ O conceito original deixa a codificação dos atributos a cargo do
 protocolo (Seção~\ref{sec:sd-pacote}). Adotou-se o \textit{layout} das
 mensagens TSTP da implementação SDAV \cite{lisha2026sdav} na escala de
 coordenadas de 32 bits em centímetros, de modo que o deslocamento de cada
-campo coincide com o daquela implementação. A
-Tabela~\ref{tab:mensagens} resume as quatro estruturas. Todos os campos
+campo coincide com o daquela implementação. O
+Quadro~\ref{qua:mensagens} resume as quatro estruturas. Todos os campos
 estão na ordem de \textit{bytes} do \textit{host}, \textit{little-endian}
 nas plataformas consideradas, sem \textit{padding}, o valor é um número de
 ponto flutuante de 64 bits, conforme o tipo numérico declarado na
 unidade.
 
-\begin{table}[htb]
+\begin{quadro}[H]
 \centering
 \fontsize{11}{13}\selectfont
-\caption{Mensagens SmartData na rede.}
-\label{tab:mensagens}
+\caption{Mensagens SmartData na rede}
+\label{qua:mensagens}
 \newcolumntype{Y}{>{\raggedright\arraybackslash}X}
 \begin{tabularx}{\textwidth}{@{}p{0.2\textwidth}p{0.12\textwidth}Y@{}}
 \toprule
@@ -1321,7 +1437,7 @@ origem; raio; \(t_f\); validade; período; valor \\
 \bottomrule
 \end{tabularx}
 \legend{Fonte: elaborada pelo autor.}
-\end{table}
+\end{quadro}
 
 Os campos de assinatura são enviados zerados, pois a camada de segurança
 está fora do escopo, e o último salto repete a origem, pois a difusão
@@ -1409,7 +1525,8 @@ de teste e de inicialização.
 \section{Estrutura do Pacote}
 \label{sec:estrutura}
 
-A organização superficial do pacote ROS é a seguinte:
+O Código~\ref{lst:estrutura} mostra a organização superficial do pacote
+ROS.
 
 \begin{lstlisting}[caption={Estrutura de diretórios do pacote
 semantic\_gateway}, label=lst:estrutura]
@@ -1443,6 +1560,7 @@ semantic_gateway/
     test_imports.cpp
     imports_test.yaml
 \end{lstlisting}
+\legend{Fonte: elaborada pelo autor.}
 
 Os \textit{headers} sob \texttt{build/generated/}, produzidos pelo
 gerador a cada compilação, complementam os \textit{headers} estáticos
@@ -1473,7 +1591,7 @@ diretamente pelos \textit{headers} gerados.
 As estruturas \texttt{Header}, \texttt{Interest}, \texttt{Response} e
 \texttt{Command}, declaradas em \texttt{wire.hpp} com
 \texttt{\#pragma pack(push,1)}, fixam o \textit{layout} binário das
-mensagens da Tabela~\ref{tab:mensagens}. Asserções estáticas sobre o
+mensagens do Quadro~\ref{qua:mensagens}. Asserções estáticas sobre o
 tamanho de cada estrutura impedem que mudanças acidentais no
 \textit{layout} comprometam silenciosamente a interoperabilidade, e um
 teste confere o deslocamento de cada campo. Os datagramas recebidos são
@@ -1654,14 +1772,14 @@ foi usado durante as medições.
 \section{Hipóteses}
 \label{sec:hipoteses}
 
-A Tabela~\ref{tab:hipoteses} resume as hipóteses, os fatores variados e os
+O Quadro~\ref{qua:hipoteses} resume as hipóteses, os fatores variados e os
 critérios de decisão.
 
-\begin{table}[!htb]
+\begin{quadro}[H]
 \centering
 \fontsize{10}{12}\selectfont
-\caption{Hipóteses, fatores e critérios de decisão dos experimentos.}
-\label{tab:hipoteses}
+\caption{Hipóteses, fatores e critérios de decisão dos experimentos}
+\label{qua:hipoteses}
 \newcolumntype{Y}{>{\raggedright\arraybackslash}X}
 \begin{tabularx}{\textwidth}{@{}p{0.06\textwidth}YYY@{}}
 \toprule
@@ -1706,7 +1824,7 @@ H5 & O robô segue os \textit{setpoints} enviados pela rede SmartData, com
 \bottomrule
 \end{tabularx}
 \legend{Fonte: elaborada pelo autor.}
-\end{table}
+\end{quadro}
 
 \section{Procedimentos}
 \label{sec:metricas}
@@ -1720,10 +1838,14 @@ H2 e H4, e três no H5, cujas execuções duram minutos. Em cada repetição,
 as latências são medidas com \texttt{std::chrono::steady\_clock}, após um
 aquecimento inicial descartado, e resumidas pelo mínimo, pelos percentis
 5, 50, 95, 99 e 99,9 e pelo máximo. Entre as repetições, relata-se a
-mediana de cada estatística, acompanhada de um intervalo de confiança de
-95\% obtido por \textit{bootstrap} da mediana. Os valores apresentados nas
-tabelas seguem esse formato, com o intervalo entre colchetes quando
-relevante.
+mediana de cada percentil, acompanhada de um intervalo de confiança de
+95\% obtido por \textit{bootstrap} de percentis \cite{efron1993bootstrap}: as repetições são
+reamostradas com reposição e o intervalo é formado pelos percentis 2,5 e
+97,5 das medianas reamostradas. O método não supõe uma distribuição para
+as latências, apenas que as repetições são independentes entre si. O
+máximo, por ser um evento isolado, é relatado apenas como o maior valor
+medido, sem inferência estatística. Os valores apresentados nas tabelas
+seguem esse formato, com o intervalo entre colchetes quando relevante.
 
 O número de amostras necessário depende do percentil: o p50 depende do
 centro da distribuição e se estabiliza com poucas centenas de amostras,
@@ -1835,35 +1957,31 @@ descritor, o p99 é de \SI{26.8}{\micro\second} no \texttt{LaserScan} de
 360 feixes, \SI{0.51}{\micro\second} na IMU e \SI{0.10}{\micro\second} na
 temperatura. A hipótese H1 é, portanto, confirmada.
 
-\begin{table}[!htb]
+\begin{table}[H]
 \centering
 \fontsize{10}{12}\selectfont
-\caption{Latência de tradução por mensagem (\si{\micro\second}), mediana
- de 30 repetições de \num{20000} mensagens.}
+\caption{Latência de tradução por mensagem (\si{\micro\second})}
 \label{tab:h1}
-\begin{tabular}{@{}lrrrrrrr@{}}
+\begin{tabular}{@{}lrrrrrr@{}}
 \toprule
 \textbf{Mensagem} & \textbf{Campos} & \textbf{p50} & \textbf{p95} &
- \textbf{p99} & \textbf{p99,9} & \textbf{Máx.} & \textbf{IC do máx.} \\
+ \textbf{p99} & \textbf{p99,9} & \textbf{Máx.} \\
 \midrule
-\texttt{Temperature} & 1 & 0,10 & 0,10 & 0,10 & 0,14 & 4,8 & [3,9; 7,5] \\
-\texttt{Imu} & 6 & 0,48 & 0,50 & 0,51 & 0,90 & 13,2 & [11,3; 14,7] \\
-\texttt{LaserScan} & 10 & 0,78 & 0,79 & 0,80 & 2,01 & 18,9 & [16,9; 20,9] \\
-\texttt{LaserScan} & 100 & 7,00 & 7,64 & 7,87 & 9,41 & 38,8 & [34,4; 49,7] \\
-\texttt{LaserScan} & 360 & 25,1 & 25,9 & 26,8 & 30,0 & 84,9 & [53,2; 109,5] \\
-\texttt{LaserScan} & \num{1000} & 69,3 & 71,5 & 74,4 & 87,1 & 141,5 & [131,3; 195,6] \\
-\texttt{LaserScan} & \num{4000} & 290,0 & 301,2 & 320,7 & 378,7 & 501,3 & [484,6; 529,5] \\
+\texttt{Temperature} & 1 & 0,10 & 0,10 & 0,10 & 0,14 & 102,2 \\
+\texttt{Imu} & 6 & 0,48 & 0,50 & 0,51 & 0,90 & 142,1 \\
+\texttt{LaserScan} & 10 & 0,78 & 0,79 & 0,80 & 2,01 & 149,4 \\
+\texttt{LaserScan} & 100 & 7,00 & 7,64 & 7,87 & 9,41 & 126,4 \\
+\texttt{LaserScan} & 360 & 25,1 & 25,9 & 26,8 & 30,0 & 209,3 \\
+\texttt{LaserScan} & \num{1000} & 69,3 & 71,5 & 74,4 & 87,1 & 253,2 \\
+\texttt{LaserScan} & \num{4000} & 290,0 & 301,2 & 320,7 & 378,7 & \num{1205.2} \\
 \bottomrule
 \end{tabular}
-\legend{Fonte: elaborada pelo autor.}
+\legend{Fonte: elaborada pelo autor.\\Notas: 1. Percentis: mediana de 30 repetições de \num{20000} mensagens.\\2. Máx.: maior valor medido entre as \num{600000} traduções.}
 \end{table}
 
-\begin{figure}[!htb]
+\begin{figure}[H]
 \centering
-\caption{Latência de tradução do \texttt{LaserScan} em função do número de
- feixes (à esquerda) e cauda da distribuição acumulada das latências de
- uma repetição, acima do 90º percentil (à direita). A linha tracejada marca o limite de
- \SI{100}{\micro\second}.}
+\caption{Latência de tradução em função do número de feixes}
 \label{fig:h1}
 \begin{tikzpicture}
 \begin{axis}[
@@ -1871,10 +1989,10 @@ temperatura. A hipótese H1 é, portanto, confirmada.
     xmode=log, ymode=log, xlabel={feixes}, ylabel={latência (\si{\micro\second})},
     legend style={font=\scriptsize, at={(0.03,0.97)}, anchor=north west},
     tick label style={font=\scriptsize}, label style={font=\small},
-    ymin=0.3, ymax=1000]
+    ymin=0.3, ymax=3000]
   \addplot+[mark=*, mark size=1.5pt] coordinates {(10,0.7775) (100,6.996) (360,25.1235) (1000,69.33) (4000,290.03)};
   \addplot+[mark=square*, mark size=1.5pt] coordinates {(10,0.803) (100,7.8745) (360,26.7725) (1000,74.35) (4000,320.7)};
-  \addplot+[mark=triangle*, mark size=1.5pt] coordinates {(10,18.9015) (100,38.771) (360,84.8625) (1000,141.49) (4000,501.26)};
+  \addplot+[mark=triangle*, mark size=1.5pt] coordinates {(10,149.4) (100,126.4) (360,209.3) (1000,253.2) (4000,1205.2)};
   \addplot[dashed, gray, domain=10:4000] {100};
   \legend{p50, p99, máx.}
 \end{axis}
@@ -1894,18 +2012,8 @@ temperatura. A hipótese H1 é, portanto, confirmada.
   \legend{10, 100, 360, \num{1000}, \num{4000}}
 \end{axis}
 \end{tikzpicture}
-\legend{Fonte: elaborada pelo autor.}
+\legend{Fonte: elaborada pelo autor.\\Nota: À esquerda, percentis do \texttt{LaserScan}; à direita, cauda da distribuição acumulada de uma repetição, acima do 90º percentil. A linha tracejada marca o limite de \SI{100}{\micro\second}.}
 \end{figure}
-
-O máximo se comporta de outra forma. Ele é um único evento entre
-\num{20000} e decorre de interrupções e preempções do sistema operacional,
-e não do trabalho de tradução, o que se reflete nos intervalos de
-confiança largos. O máximo permanece abaixo de \SI{100}{\micro\second}
-até 360 feixes, mas o intervalo de confiança para 360 feixes já alcança
-\SI{109}{\micro\second}, e para \num{1000} feixes o máximo chega a
-\SI{141}{\micro\second}. Em um núcleo Linux sem preempção total, a
-latência no pior caso é limitada pela plataforma, e não pelo gateway, e o
-critério adotado refere-se, por isso, ao p99.
 
 A suficiência das \num{20000} iterações por repetição foi verificada sobre
 uma série única de \num{200000} traduções. A
@@ -1923,12 +2031,10 @@ em cada repetição do H1 bastam, portanto, para o p50 e o p99, e a mediana
 de 30 repetições, com o seu intervalo de confiança estreito, compensa a
 sensibilidade do p95 e do p99,9.
 
-\begin{table}[!htb]
+\begin{table}[H]
 \centering
 \fontsize{10}{12}\selectfont
-\caption{Percentis da latência de tradução (\si{\micro\second}) sobre
- prefixos crescentes de uma série de \num{200000} traduções de um
- \texttt{LaserScan} de 100 feixes.}
+\caption{Percentis da latência de tradução por número de iterações (\si{\micro\second})}
 \label{tab:convergencia}
 \begin{tabular}{@{}rrrrr@{}}
 \toprule
@@ -1942,13 +2048,12 @@ sensibilidade do p95 e do p99,9.
 \num{200000} & 7,25 & 7,38 & 8,07 & 9,03 \\
 \bottomrule
 \end{tabular}
-\legend{Fonte: elaborada pelo autor.}
+\legend{Fonte: elaborada pelo autor.\\Nota: Prefixos crescentes de uma série de \num{200000} traduções de um \texttt{LaserScan} de 100 feixes.}
 \end{table}
 
-\begin{figure}[!htb]
+\begin{figure}[H]
 \centering
-\caption{Percentis da latência de tradução em função do número de
- iterações.}
+\caption{Percentis da latência de tradução por número de iterações}
 \label{fig:convergencia}
 \begin{tikzpicture}
 \begin{axis}[
@@ -1982,12 +2087,10 @@ servida satura em cerca de \num{1080} varreduras por segundo; a
 \num{1000} varreduras por segundo, o p99 já sobe para
 \SI{2.1}{\milli\second}, sinal da proximidade da saturação.
 
-\begin{table}[!htb]
+\begin{table}[H]
 \centering
 \fontsize{10}{12}\selectfont
-\caption{Carga em laço aberto com \texttt{LaserScan} de 100 feixes:
- taxa servida, perda por transbordo da fila e latência desde a chegada
- agendada, mediana de cinco repetições.}
+\caption{Carga em laço aberto}
 \label{tab:h2}
 \begin{tabular}{@{}rrrrr@{\hspace{2em}}rrrrr@{}}
 \toprule
@@ -2009,14 +2112,21 @@ servida satura em cerca de \num{1080} varreduras por segundo; a
 \num{200000} & \num{117547} & 41\% & 31,0 & 33,8 & \num{2000} & \num{1081} & 46\% & \num{3187} & \num{4562} \\
 \bottomrule
 \end{tabular}
-\legend{Fonte: elaborada pelo autor.}
+\legend{Fonte: elaborada pelo autor.\\Nota: \texttt{LaserScan} de 100 feixes; taxa servida, perda por transbordo da fila e latência desde a chegada agendada, mediana de cinco repetições.}
 \end{table}
 
-\begin{figure}[!htb]
+Assim, $R^*$ é de \num{90000} varreduras por segundo sem envio, entre as
+taxas avaliadas, o que corresponde a \num{9e6} atualizações de
+SmartData por segundo, trinta vezes a meta de
+$\SI{3e5}{\per\second}$ do LiDAR 3D, e de \num{1000} varreduras por
+segundo com envio, ou \num{100000} datagramas por segundo, quase o dobro
+da meta de $\SI{5.4e4}{\per\second}$ do LiDAR 2D com a IMU. A hipótese H2
+é confirmada: o ponto de saturação existe, é delimitado, e fica acima das
+duas metas de vazão.
+
+\begin{figure}[H]
 \centering
-\caption{Taxa servida em função da taxa ofertada, sem envio (à esquerda) e
- com 100 respostas por varredura (à direita). A linha tracejada indica a
- taxa servida igual à ofertada.}
+\caption{Taxa servida em função da taxa ofertada}
 \label{fig:h2}
 \begin{tikzpicture}
 \begin{axis}[
@@ -2037,17 +2147,8 @@ servida satura em cerca de \num{1080} varreduras por segundo; a
   \addplot+[mark size=1.5pt] coordinates {(50,50.4954) (100,100.484) (200,200.463) (400,400.419) (600,600.381) (800,800.331) (1000,1000.28) (1500,1076.35) (2000,1081.45)};
 \end{axis}
 \end{tikzpicture}
-\legend{Fonte: elaborada pelo autor.}
+\legend{Fonte: elaborada pelo autor.\\Nota: A linha tracejada indica a taxa servida igual à ofertada.}
 \end{figure}
-
-Assim, $R^*$ é de \num{90000} varreduras por segundo sem envio, entre as
-taxas avaliadas, o que corresponde a \num{9e6} atualizações de
-SmartData por segundo, trinta vezes a meta de
-$\SI{3e5}{\per\second}$ do LiDAR 3D, e de \num{1000} varreduras por
-segundo com envio, ou \num{100000} datagramas por segundo, quase o dobro
-da meta de $\SI{5.4e4}{\per\second}$ do LiDAR 2D com a IMU. A hipótese H2
-é confirmada: o ponto de saturação existe, é delimitado, e fica acima das
-duas metas de vazão.
 
 \subsection{Custo do Envio (H3)}
 A Tabela~\ref{tab:h3} e a Figura~\ref{fig:h3} comparam o gateway às bases
@@ -2066,12 +2167,10 @@ do critério. A entrega local custa cerca de \SI{1.3}{\micro\second} por
 datagrama, diferença entre o \textit{socket} cru com e sem receptor para
 $K = 1$.
 
-\begin{table}[!htb]
+\begin{table}[H]
 \centering
 \fontsize{10}{12}\selectfont
-\caption{Latência por varredura de 100 feixes (\si{\micro\second}) em
- função do número $K$ de respostas enviadas: p50 / p95, mediana de 30
- repetições.}
+\caption{Latência por varredura em função do número de respostas (\si{\micro\second})}
 \label{tab:h3}
 \begin{tabular}{@{}rcccc@{}}
 \toprule
@@ -2085,29 +2184,8 @@ $K$ & \textbf{Gateway} & \textbf{\texttt{sd::Network}} &
 100 & \num{1012} / \num{2004} & 999 / \num{1965} & \num{1004} / \num{1761} & \num{1000} / \num{1931} \\
 \bottomrule
 \end{tabular}
-\legend{Fonte: elaborada pelo autor.}
+\legend{Fonte: elaborada pelo autor.\\Nota: \texttt{LaserScan} de 100 feixes; p50 / p95, mediana de 30 repetições.}
 \end{table}
-
-\begin{figure}[!htb]
-\centering
-\caption{Mediana da latência por varredura em função do número $K$ de
- respostas, no gateway e nas bases de comparação sem o gateway.}
-\label{fig:h3}
-\begin{tikzpicture}
-\begin{axis}[
-    width=0.75\textwidth, height=0.42\textwidth,
-    xmode=log, ymode=log, xlabel={respostas por varredura ($K$)}, ylabel={p50 (\si{\micro\second})},
-    legend style={font=\scriptsize, at={(0.03,0.97)}, anchor=north west},
-    tick label style={font=\scriptsize}, label style={font=\small}]
-  \addplot+[mark size=1.5pt] coordinates {(1,12.643) (10,46.0365) (50,202.28) (100,1011.7)};
-  \addplot+[mark size=1.5pt] coordinates {(1,3.5355) (10,34.9895) (50,184.8625) (100,998.5)};
-  \addplot+[mark size=1.5pt] coordinates {(1,2.241) (10,19.8065) (50,100.642) (100,1003.95)};
-  \addplot+[mark size=1.5pt] coordinates {(1,3.5255) (10,34.581) (50,180.022) (100,999.99)};
-  \legend{gateway, \texttt{sd::Network}, \textit{socket} cru, cru com receptor}
-\end{axis}
-\end{tikzpicture}
-\legend{Fonte: elaborada pelo autor.}
-\end{figure}
 
 O custo, no entanto, não é linear em $K$. Por datagrama, o
 \textit{socket} cru custa cerca de \SI{2}{\micro\second} até $K = 50$ e
@@ -2125,6 +2203,26 @@ pela placa Wi-Fi, e o custo por datagrama converge para o da interface. A
 segunda parte da hipótese, que atribui o custo ao sistema operacional e
 não ao gateway, é confirmada.
 
+\begin{figure}[H]
+\centering
+\caption{Latência por varredura em função do número de respostas}
+\label{fig:h3}
+\begin{tikzpicture}
+\begin{axis}[
+    width=0.75\textwidth, height=0.42\textwidth,
+    xmode=log, ymode=log, xlabel={respostas por varredura ($K$)}, ylabel={p50 (\si{\micro\second})},
+    legend style={font=\scriptsize, at={(0.03,0.97)}, anchor=north west},
+    tick label style={font=\scriptsize}, label style={font=\small}]
+  \addplot+[mark size=1.5pt] coordinates {(1,12.643) (10,46.0365) (50,202.28) (100,1011.7)};
+  \addplot+[mark size=1.5pt] coordinates {(1,3.5355) (10,34.9895) (50,184.8625) (100,998.5)};
+  \addplot+[mark size=1.5pt] coordinates {(1,2.241) (10,19.8065) (50,100.642) (100,1003.95)};
+  \addplot+[mark size=1.5pt] coordinates {(1,3.5255) (10,34.581) (50,180.022) (100,999.99)};
+  \legend{gateway, \texttt{sd::Network}, \textit{socket} cru, cru com receptor}
+\end{axis}
+\end{tikzpicture}
+\legend{Fonte: elaborada pelo autor.\\Nota: Mediana de 30 repetições, no gateway e nas bases de comparação sem o gateway.}
+\end{figure}
+
 \subsection{Latência de Ponta a Ponta (H4)}
 A Tabela~\ref{tab:h4} e a Figura~\ref{fig:h4} comparam o salto ROS 2
 direto ao caminho completo pela rede SmartData. Em todas as taxas, o p95
@@ -2140,12 +2238,10 @@ mediana foi nula; a maior perda em uma repetição isolada foi de 1,4\%, a
 duas primeiras partes da hipótese H4 são confirmadas, e a terceira é
 refutada a partir de \SI{1000}{\hertz}.
 
-\begin{table}[!htb]
+\begin{table}[H]
 \centering
 \fontsize{10}{12}\selectfont
-\caption{Latência de ponta a ponta de mensagens \texttt{Imu}
- (\si{\micro\second}) pelo salto ROS 2 direto e pelo caminho gateway
- $\to$ rede SmartData $\to$ \textit{proxy}, mediana de cinco repetições.}
+\caption{Latência de ponta a ponta (\si{\micro\second})}
 \label{tab:h4}
 \begin{tabular}{@{}rrrrrrrr@{}}
 \toprule
@@ -2161,32 +2257,8 @@ refutada a partir de \SI{1000}{\hertz}.
 \num{5000} & 18 & 23 & 27 & 74 & 86 & 100 & +56 \\
 \bottomrule
 \end{tabular}
-\legend{Fonte: elaborada pelo autor.}
+\legend{Fonte: elaborada pelo autor.\\Nota: Mensagens \texttt{Imu} pelo salto ROS 2 direto e pelo caminho gateway $\to$ rede SmartData $\to$ \textit{proxy}, mediana de cinco repetições.}
 \end{table}
-
-\begin{figure}[!htb]
-\centering
-\caption{Mediana (marcadores cheios) e 95º percentil (marcadores vazios)
- da latência de ponta a ponta em função da taxa de publicação. A linha
- tracejada marca o limite de \SI{1}{\milli\second}.}
-\label{fig:h4}
-\begin{tikzpicture}
-\begin{axis}[
-    width=0.75\textwidth, height=0.42\textwidth,
-    xmode=log, ymode=log, xlabel={taxa de publicação (\si{\hertz})}, ylabel={latência (\si{\micro\second})},
-    legend style={font=\scriptsize, at={(0.03,0.03)}, anchor=south west},
-    tick label style={font=\scriptsize}, label style={font=\small},
-    ymin=10, ymax=1500]
-  \addplot[blue, mark=*, mark size=1.5pt] coordinates {(100,284.476) (500,139.282) (1000,58.304) (2000,43.3) (5000,17.6)};
-  \addplot[red, mark=square*, mark size=1.5pt] coordinates {(100,547.131) (500,230.614) (1000,137.328) (2000,101.1) (5000,73.7)};
-  \addplot[blue, mark=o, mark size=1.5pt, densely dotted] coordinates {(100,358.283) (500,220.032) (1000,164.801) (2000,72.9) (5000,22.6)};
-  \addplot[red, mark=square, mark size=1.5pt, densely dotted] coordinates {(100,675.432) (500,368.181) (1000,265.359) (2000,126.7) (5000,85.8)};
-  \addplot[dashed, gray, domain=100:5000] {1000};
-  \legend{direto, pelo gateway}
-\end{axis}
-\end{tikzpicture}
-\legend{Fonte: elaborada pelo autor.}
-\end{figure}
 
 O resultado mais saliente, porém, é a dependência da latência em relação
 à taxa: o próprio salto direto leva \SI{284}{\micro\second} a
@@ -2208,6 +2280,28 @@ salto direto, sem tradução nem rede, é excepcionalmente barato; o critério
 absoluto, de p95 abaixo do piso de \SI{1}{\milli\second}, foi atendido em
 todas as taxas.
 
+\begin{figure}[H]
+\centering
+\caption{Latência de ponta a ponta em função da taxa de publicação}
+\label{fig:h4}
+\begin{tikzpicture}
+\begin{axis}[
+    width=0.75\textwidth, height=0.42\textwidth,
+    xmode=log, ymode=log, xlabel={taxa de publicação (\si{\hertz})}, ylabel={latência (\si{\micro\second})},
+    legend style={font=\scriptsize, at={(0.03,0.03)}, anchor=south west},
+    tick label style={font=\scriptsize}, label style={font=\small},
+    ymin=10, ymax=1500]
+  \addplot[blue, mark=*, mark size=1.5pt] coordinates {(100,284.476) (500,139.282) (1000,58.304) (2000,43.3) (5000,17.6)};
+  \addplot[red, mark=square*, mark size=1.5pt] coordinates {(100,547.131) (500,230.614) (1000,137.328) (2000,101.1) (5000,73.7)};
+  \addplot[blue, mark=o, mark size=1.5pt, densely dotted] coordinates {(100,358.283) (500,220.032) (1000,164.801) (2000,72.9) (5000,22.6)};
+  \addplot[red, mark=square, mark size=1.5pt, densely dotted] coordinates {(100,675.432) (500,368.181) (1000,265.359) (2000,126.7) (5000,85.8)};
+  \addplot[dashed, gray, domain=100:5000] {1000};
+  \legend{direto, pelo gateway}
+\end{axis}
+\end{tikzpicture}
+\legend{Fonte: elaborada pelo autor.\\Nota: Marcadores cheios: mediana; vazios: 95º percentil. A linha tracejada marca o limite de \SI{1}{\milli\second}.}
+\end{figure}
+
 \subsection{Seguimento de Comandos (H5)}
 A Tabela~\ref{tab:h5} e a Figura~\ref{fig:h5} mostram a resposta do robô
 aos degraus de velocidade. O erro de regime foi o mesmo nas três
@@ -2224,11 +2318,10 @@ mensagem em um único \textit{setpoint}
 \SI{0.3}{\milli\second}, corresponde aos dois saltos ROS 2 e ao envio
 pela rede. A hipótese H5 é confirmada.
 
-\begin{table}[!htb]
+\begin{table}[H]
 \centering
 \fontsize{10}{12}\selectfont
-\caption{Erro de regime e atraso de comando por degrau, nas três
- repetições do cenário Gazebo.}
+\caption{Erro de regime e atraso de comando por degrau}
 \label{tab:h5}
 \begin{tabular}{@{}crrrrc@{}}
 \toprule
@@ -2244,14 +2337,12 @@ pela rede. A hipótese H5 é confirmada.
 5 & 0,00 & 0,00 & $<$\,\num{e-4} & $<$\,\num{e-4} & 2,28--2,39 \\
 \bottomrule
 \end{tabular}
-\legend{Fonte: elaborada pelo autor.}
+\legend{Fonte: elaborada pelo autor.\\Nota: Três repetições do cenário Gazebo.}
 \end{table}
 
-\begin{figure}[!htb]
+\begin{figure}[H]
 \centering
-\caption{Velocidades linear (à esquerda) e angular (à direita) comandadas
- pela rede SmartData e medidas pela odometria do robô, na primeira
- repetição do cenário Gazebo.}
+\caption{Velocidades comandadas e medidas no Gazebo}
 \label{fig:h5}
 \pgfplotstableread{
         t cv cw ov ow
@@ -2630,22 +2721,22 @@ pela rede. A hipótese H5 é confirmada.
   \addplot[red] table[x=t, y=ow] {\hfivedata};
 \end{axis}
 \end{tikzpicture}
-\legend{Fonte: elaborada pelo autor.}
+\legend{Fonte: elaborada pelo autor.\\Nota: Velocidade linear à esquerda e angular à direita, comandadas pela rede SmartData e medidas pela odometria do robô, na primeira repetição.}
 \end{figure}
 
 \subsection{Síntese}
-A Tabela~\ref{tab:resultados} reúne o veredito de cada hipótese. As
+O Quadro~\ref{qua:resultados} reúne o veredito de cada hipótese. As
 hipóteses H1, H2 e H5 foram confirmadas. Das hipóteses H3 e H4, foram
 confirmadas as partes que tratam do custo do gateway e do limite absoluto
 de latência, e refutadas as que supunham linearidade do envio e uma
 sobrecarga menor que um salto ROS 2 em todas as taxas; em ambos os casos,
 a causa identificada está na plataforma, e não no gateway.
 
-\begin{table}[!htb]
+\begin{quadro}[H]
 \centering
 \fontsize{10}{12}\selectfont
-\caption{Síntese dos resultados frente aos critérios de decisão.}
-\label{tab:resultados}
+\caption{Síntese dos resultados frente aos critérios de decisão}
+\label{qua:resultados}
 \newcolumntype{Y}{>{\raggedright\arraybackslash}X}
 \begin{tabularx}{\textwidth}{@{}p{0.06\textwidth}YY>{\raggedright\arraybackslash}p{0.2\textwidth}@{}}
 \toprule
@@ -2683,7 +2774,7 @@ H5 & $|\text{erro}| < \max(0{,}01;\ 5\%)$
 \bottomrule
 \end{tabularx}
 \legend{Fonte: elaborada pelo autor.}
-\end{table}
+\end{quadro}
 
 \section{Discussão}
 \label{sec:discussao}
